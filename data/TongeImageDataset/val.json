@@ -1,0 +1,632 @@
+[
+  {
+    "image": "origin_Image/241.png",
+    "mask": "origin_GT/241.png",
+    "bbox_2d": [
+      213,
+      117,
+      579,
+      428
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [213, 117, 579, 428], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/242.png",
+    "mask": "origin_GT/242.png",
+    "bbox_2d": [
+      239,
+      78,
+      573,
+      420
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [239, 78, 573, 420], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/243.png",
+    "mask": "origin_GT/243.png",
+    "bbox_2d": [
+      164,
+      25,
+      556,
+      243
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [164, 25, 556, 243], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/244.png",
+    "mask": "origin_GT/244.png",
+    "bbox_2d": [
+      215,
+      60,
+      590,
+      391
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [215, 60, 590, 391], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/245.png",
+    "mask": "origin_GT/245.png",
+    "bbox_2d": [
+      201,
+      86,
+      629,
+      391
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [201, 86, 629, 391], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/246.png",
+    "mask": "origin_GT/246.png",
+    "bbox_2d": [
+      217,
+      72,
+      600,
+      459
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [217, 72, 600, 459], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/247.png",
+    "mask": "origin_GT/247.png",
+    "bbox_2d": [
+      208,
+      14,
+      629,
+      364
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [208, 14, 629, 364], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/248.png",
+    "mask": "origin_GT/248.png",
+    "bbox_2d": [
+      184,
+      123,
+      617,
+      394
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [184, 123, 617, 394], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/249.png",
+    "mask": "origin_GT/249.png",
+    "bbox_2d": [
+      207,
+      74,
+      567,
+      406
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [207, 74, 567, 406], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/250.png",
+    "mask": "origin_GT/250.png",
+    "bbox_2d": [
+      232,
+      94,
+      582,
+      353
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [232, 94, 582, 353], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/251.png",
+    "mask": "origin_GT/251.png",
+    "bbox_2d": [
+      206,
+      29,
+      592,
+      339
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [206, 29, 592, 339], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/252.png",
+    "mask": "origin_GT/252.png",
+    "bbox_2d": [
+      189,
+      19,
+      587,
+      382
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [189, 19, 587, 382], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/253.png",
+    "mask": "origin_GT/253.png",
+    "bbox_2d": [
+      239,
+      20,
+      578,
+      391
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [239, 20, 578, 391], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/254.png",
+    "mask": "origin_GT/254.png",
+    "bbox_2d": [
+      249,
+      78,
+      575,
+      360
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [249, 78, 575, 360], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/255.png",
+    "mask": "origin_GT/255.png",
+    "bbox_2d": [
+      223,
+      1,
+      612,
+      337
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [223, 1, 612, 337], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/256.png",
+    "mask": "origin_GT/256.png",
+    "bbox_2d": [
+      163,
+      34,
+      568,
+      358
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [163, 34, 568, 358], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/257.png",
+    "mask": "origin_GT/257.png",
+    "bbox_2d": [
+      214,
+      16,
+      574,
+      429
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [214, 16, 574, 429], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/258.png",
+    "mask": "origin_GT/258.png",
+    "bbox_2d": [
+      169,
+      31,
+      585,
+      326
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [169, 31, 585, 326], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/259.png",
+    "mask": "origin_GT/259.png",
+    "bbox_2d": [
+      232,
+      118,
+      563,
+      488
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [232, 118, 563, 488], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/260.png",
+    "mask": "origin_GT/260.png",
+    "bbox_2d": [
+      243,
+      35,
+      602,
+      323
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [243, 35, 602, 323], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/261.png",
+    "mask": "origin_GT/261.png",
+    "bbox_2d": [
+      239,
+      34,
+      596,
+      319
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [239, 34, 596, 319], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/262.png",
+    "mask": "origin_GT/262.png",
+    "bbox_2d": [
+      219,
+      14,
+      588,
+      328
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [219, 14, 588, 328], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/263.png",
+    "mask": "origin_GT/263.png",
+    "bbox_2d": [
+      247,
+      30,
+      558,
+      343
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [247, 30, 558, 343], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/264.png",
+    "mask": "origin_GT/264.png",
+    "bbox_2d": [
+      192,
+      96,
+      559,
+      456
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [192, 96, 559, 456], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/265.png",
+    "mask": "origin_GT/265.png",
+    "bbox_2d": [
+      201,
+      21,
+      608,
+      378
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [201, 21, 608, 378], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/266.png",
+    "mask": "origin_GT/266.png",
+    "bbox_2d": [
+      214,
+      142,
+      534,
+      431
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [214, 142, 534, 431], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/267.png",
+    "mask": "origin_GT/267.png",
+    "bbox_2d": [
+      159,
+      47,
+      551,
+      507
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [159, 47, 551, 507], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/268.png",
+    "mask": "origin_GT/268.png",
+    "bbox_2d": [
+      181,
+      38,
+      548,
+      419
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [181, 38, 548, 419], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/269.png",
+    "mask": "origin_GT/269.png",
+    "bbox_2d": [
+      225,
+      9,
+      572,
+      403
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [225, 9, 572, 403], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  },
+  {
+    "image": "origin_Image/270.png",
+    "mask": "origin_GT/270.png",
+    "bbox_2d": [
+      225,
+      33,
+      587,
+      333
+    ],
+    "label": "tongue",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
+      },
+      {
+        "from": "gpt",
+        "value": "[{\"bbox_2d\": [225, 33, 587, 333], \"label\": \"tongue\", \"mask\": \"<mask_start><mask_token><mask_end>\"}]"
+      }
+    ]
+  }
+]

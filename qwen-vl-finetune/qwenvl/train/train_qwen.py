@@ -18,6 +18,21 @@ import os
 import logging
 import pathlib
 import torch
+import importlib.metadata
+
+os.environ.setdefault("USE_HUB_KERNELS", "NO")
+
+_orig_importlib_version = importlib.metadata.version
+
+
+def _hide_broken_kernels_package(package_name):
+    if package_name == "kernels":
+        raise importlib.metadata.PackageNotFoundError(package_name)
+    return _orig_importlib_version(package_name)
+
+
+importlib.metadata.version = _hide_broken_kernels_package
+
 import transformers
 import sys
 from pathlib import Path
@@ -25,15 +40,8 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
-from trainer import replace_qwen2_vl_attention_class
-
-from transformers import (
-    Qwen2VLForConditionalGeneration,
-    Qwen2_5_VLForConditionalGeneration,
-    Qwen3VLForConditionalGeneration,
-    Qwen3VLMoeForConditionalGeneration
-)
 from qwenvl.data.data_processor import make_supervised_data_module
+from qwenvl.model import Qwen3VLSegForConditionalGeneration
 from qwenvl.train.argument import (
     ModelArguments,
     DataArguments,
@@ -89,8 +97,20 @@ def set_model(model_args, model):
         model.lm_head.requires_grad = False
 
 
-def train(attn_implementation="flash_attention_2"):
+def resolve_attn_implementation(attn_implementation):
+    if attn_implementation != "auto":
+        return attn_implementation
+    try:
+        import flash_attn  # noqa: F401
+
+        return "flash_attention_2"
+    except ImportError:
+        return "sdpa"
+
+
+def train(attn_implementation="auto"):
     global local_rank
+    attn_implementation = resolve_attn_implementation(attn_implementation)
 
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments)
@@ -99,8 +119,17 @@ def train(attn_implementation="flash_attention_2"):
 
     local_rank = training_args.local_rank
     os.makedirs(training_args.output_dir, exist_ok=True)
+    if training_args.seg_enable:
+        if data_args.data_flatten or data_args.data_packing:
+            raise ValueError("segmentation training does not support data_flatten or data_packing")
+        if training_args.lora_enable:
+            raise ValueError("phase 1 segmentation training does not support LoRA")
 
     if "qwen3" in model_args.model_name_or_path.lower() and "a" in Path(model_args.model_name_or_path.rstrip("/")).name.lower():
+        if training_args.seg_enable:
+            raise ValueError("phase 1 segmentation training only supports dense Qwen3-VL")
+        from transformers import Qwen3VLMoeForConditionalGeneration
+
         model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
@@ -109,6 +138,8 @@ def train(attn_implementation="flash_attention_2"):
         )
         data_args.model_type = "qwen3vl"
     elif "qwen3" in model_args.model_name_or_path.lower():
+        from transformers import Qwen3VLForConditionalGeneration
+
         model = Qwen3VLForConditionalGeneration.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
@@ -117,6 +148,8 @@ def train(attn_implementation="flash_attention_2"):
         )
         data_args.model_type = "qwen3vl"
     elif "qwen2.5" in model_args.model_name_or_path.lower():
+        from transformers import Qwen2_5_VLForConditionalGeneration
+
         model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
@@ -125,6 +158,8 @@ def train(attn_implementation="flash_attention_2"):
         )
         data_args.model_type = "qwen2.5vl"
     else:
+        from transformers import Qwen2VLForConditionalGeneration
+
         model = Qwen2VLForConditionalGeneration.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
@@ -139,10 +174,12 @@ def train(attn_implementation="flash_attention_2"):
     )
 
     if data_args.data_flatten or data_args.data_packing:
+        from trainer import replace_qwen2_vl_attention_class
+
         replace_qwen2_vl_attention_class()
     model.config.use_cache = False
 
-    if training_args.gradient_checkpointing:
+    if training_args.gradient_checkpointing and not training_args.seg_enable:
         if hasattr(model, "enable_input_require_grads"):
             model.enable_input_require_grads()
         else:
@@ -160,7 +197,20 @@ def train(attn_implementation="flash_attention_2"):
         use_fast=False,
     )
 
-    if training_args.lora_enable:
+    if training_args.seg_enable:
+        if data_args.model_type != "qwen3vl":
+            raise ValueError("segmentation training only supports qwen3vl")
+        model = Qwen3VLSegForConditionalGeneration(
+            model,
+            seg_mask_size=data_args.seg_mask_size,
+            seg_loss_weight=training_args.seg_loss_weight,
+        )
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            if torch.distributed.get_rank() == 0:
+                rank0_print("Segmentation enabled: trainable mask head will be initialized on first forward.")
+        else:
+            rank0_print("Segmentation enabled: trainable mask head will be initialized on first forward.")
+    elif training_args.lora_enable:
         from peft import LoraConfig, get_peft_model, TaskType
         print("LoRA enabled")
 
@@ -179,7 +229,7 @@ def train(attn_implementation="flash_attention_2"):
     else:
         set_model(model_args, model)
 
-        if torch.distributed.get_rank() == 0:
+        if torch.distributed.is_available() and torch.distributed.is_initialized() and torch.distributed.get_rank() == 0:
             model.visual.print_trainable_parameters()
             model.model.print_trainable_parameters()
     
@@ -188,7 +238,10 @@ def train(attn_implementation="flash_attention_2"):
         model=model, processing_class=tokenizer, args=training_args, **data_module
     )
 
-    if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
+    checkpoints = list(pathlib.Path(training_args.output_dir).glob("checkpoint-*"))
+    if checkpoints and training_args.seg_enable:
+        checkpoints = [path for path in checkpoints if (path / "trainer_state.json").exists()]
+    if checkpoints:
         logging.info("checkpoint found, resume training")
         trainer.train(resume_from_checkpoint=True)
     else:
@@ -203,4 +256,4 @@ def train(attn_implementation="flash_attention_2"):
 
 
 if __name__ == "__main__":
-    train(attn_implementation="flash_attention_2")
+    train()

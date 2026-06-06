@@ -11,7 +11,9 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.utils.data import Dataset
+from PIL import Image
 
 import transformers
 
@@ -39,6 +41,12 @@ def read_jsonl(path):
 
 def _make_abs_paths(base: Path, files: str) -> str:
     return f"{(base / files).resolve()}"
+
+
+def _load_rgb_image(base: Path, file: str) -> Image.Image:
+    image = Image.open(base / file).convert("RGB")
+    image.load()
+    return image
 
 
 def update_processor_pixels(processor, data_args):
@@ -148,9 +156,7 @@ def _build_messages(item: Dict[str, Any], base_path: Path) -> List[Dict[str, Any
         videos = [videos]
 
     # Build media pools with absolute paths
-    image_pool = [
-        {"type": "image", "image": _make_abs_paths(base_path, img)} for img in images
-    ]
+    image_pool = [{"type": "image", "image": _load_rgb_image(base_path, img)} for img in images]
     video_pool = [
         {"type": "video", "video": _make_abs_paths(base_path, vid)} for vid in videos
     ]
@@ -239,6 +245,38 @@ def preprocess_qwen_visual(
     full_result["labels"] = labels
     full_result["input_ids"] = input_ids
     return full_result
+
+
+def load_seg_fields(source: Dict[str, Any], mask_size: int) -> Dict[str, torch.Tensor]:
+    base_path = Path(source.get("data_path", ""))
+    mask_path = base_path / source["mask"]
+    if "bbox_2d" not in source:
+        raise ValueError(f"missing bbox_2d for segmentation sample: {source}")
+
+    mask = torch.from_numpy(np.array(Image.open(mask_path).convert("L")) > 0).float()
+    if mask.sum() == 0:
+        raise ValueError(f"empty mask: {mask_path}")
+
+    height, width = mask.shape
+    mask = F.interpolate(
+        mask[None, None],
+        size=(mask_size, mask_size),
+        mode="nearest",
+    )[0]
+
+    x1, y1, x2, y2 = source["bbox_2d"]
+    box = torch.tensor(
+        [x1 / width, y1 / height, x2 / width, y2 / height],
+        dtype=torch.float32,
+    ).clamp(0, 1)
+    if box[2] <= box[0] or box[3] <= box[1]:
+        raise ValueError(f"invalid bbox_2d for {mask_path}: {source['bbox_2d']}")
+
+    return {
+        "gt_masks": mask,
+        "gt_boxes": box,
+        "orig_size": torch.tensor([height, width], dtype=torch.long),
+    }
 
 
 class LazySupervisedDataset(Dataset):
@@ -437,6 +475,9 @@ class LazySupervisedDataset(Dataset):
         ]
         label = self.processor.tokenizer.decode(labels, skip_special_tokens=False)
 
+        if "mask" in sources[0]:
+            data_dict.update(load_seg_fields(sources[0], self.data_args.seg_mask_size))
+
         return data_dict
 
     def _get_packed_item(self, sources) -> Dict[str, torch.Tensor]:
@@ -598,6 +639,10 @@ class DataCollatorForSupervisedDataset(object):
         batch["pixel_values_videos"] = concat_videos
         batch["video_grid_thw"] = video_grid_thw
         batch["position_ids"] = position_ids
+        if any("gt_masks" in instance for instance in instances):
+            batch["gt_masks"] = torch.stack([instance["gt_masks"] for instance in instances])
+            batch["gt_boxes"] = torch.stack([instance["gt_boxes"] for instance in instances])
+            batch["orig_size"] = torch.stack([instance["orig_size"] for instance in instances])
         return batch
 
 

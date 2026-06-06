@@ -26,12 +26,18 @@ VIDEOCHATGPT = {
     "data_path": "PATH_TO_VIDEOCHATGPT_DATA",
 }
 
+TONGUE_SEG = {
+    "annotation_path": "data/TongeImageDataset/train.json",
+    "data_path": "data/TongeImageDataset",
+}
+
 data_dict = {
     "cambrian_737k": CAMBRIAN_737K,
     "cambrian_737k_pack": CAMBRIAN_737K_PACK,
     "mp_doc": MP_DOC,
     "clevr_mc": CLEVR_MC,
     "videochatgpt": VIDEOCHATGPT,
+    "tongue_seg": TONGUE_SEG,
 }
 
 

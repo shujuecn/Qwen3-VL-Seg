@@ -1,0 +1,32 @@
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Local environments and caches
+.venv/
+venv/
+.env
+.cache/
+
+# Training and evaluation artifacts
+outputs/
+checkpoints/
+runs/
+wandb/
+*.log
+*.safetensors
+*.pt
+*.pth
+*.bin
+
+# Local raw datasets
+data/TongeImageDataset/origin_Image/
+data/TongeImageDataset/origin_GT/
+
+# Large local reference files
+materials/
+
+# OS/editor files
+.DS_Store
+.idea/
+.vscode/

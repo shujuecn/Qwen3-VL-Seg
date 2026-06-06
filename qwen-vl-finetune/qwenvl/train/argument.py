@@ -15,6 +15,7 @@ class DataArguments:
     dataset_use: str = field(default="")
     data_flatten: bool = field(default=False)
     data_packing: bool = field(default=False)
+    seg_mask_size: int = field(default=256)
     base_interval: int = field(default=2)
     max_pixels: int = field(default=28 * 28 * 576)
     min_pixels: int = field(default=28 * 28 * 16)
@@ -37,6 +38,8 @@ class TrainingArguments(transformers.TrainingArguments):
     )
     mm_projector_lr: Optional[float] = None
     vision_tower_lr: Optional[float] = None
+    seg_enable: bool = field(default=False)
+    seg_loss_weight: float = field(default=1.0)
 
     ## Lora config
     lora_enable: bool = field(default=False)
