@@ -484,7 +484,13 @@
         "--seg_refine",
         "True",
         "--max_overlays",
-        "30"
+        "5",
+        "--overlay_top_k_worst",
+        "5",
+        "--overlay_alpha",
+        "85",
+        "--overview_count",
+        "5"
       ]
     },
     {
@@ -514,7 +520,13 @@
         "--seg_refine",
         "True",
         "--max_overlays",
-        "30"
+        "5",
+        "--overlay_top_k_worst",
+        "5",
+        "--overlay_alpha",
+        "85",
+        "--overview_count",
+        "5"
       ]
     }
   ]

@@ -81,20 +81,85 @@ def make_messages(source, processor):
     return data
 
 
-def overlay_image(image, gt_mask, pred_mask, box):
+def mask_rgba(mask, color, alpha):
+    rgba = Image.new("RGBA", mask.shape[::-1], (*color, 0))
+    rgba.putalpha(Image.fromarray((mask.astype(np.uint8) * alpha), mode="L"))
+    return rgba
+
+
+def overlay_image(image, gt_mask, pred_mask, box, alpha):
     image = image.convert("RGB")
-    overlay = image.copy()
-    gt = Image.fromarray((gt_mask * 120).astype(np.uint8), mode="L")
-    pred = Image.fromarray((pred_mask * 120).astype(np.uint8), mode="L")
-    gt_rgba = Image.new("RGBA", image.size, (0, 210, 90, 0))
-    pred_rgba = Image.new("RGBA", image.size, (230, 40, 40, 0))
-    gt_rgba.putalpha(gt)
-    pred_rgba.putalpha(pred)
-    overlay = Image.alpha_composite(overlay.convert("RGBA"), gt_rgba)
-    overlay = Image.alpha_composite(overlay, pred_rgba).convert("RGB")
+    overlay = Image.alpha_composite(image.convert("RGBA"), mask_rgba(gt_mask, (0, 210, 90), alpha))
+    overlay = Image.alpha_composite(overlay, mask_rgba(pred_mask, (230, 40, 40), alpha)).convert("RGB")
     draw = ImageDraw.Draw(overlay)
     draw.rectangle(box, outline=(255, 210, 0), width=3)
     return overlay
+
+
+def single_mask_overlay(image, mask, color, alpha, box=None):
+    image = image.convert("RGB")
+    overlay = Image.alpha_composite(image.convert("RGBA"), mask_rgba(mask, color, alpha)).convert("RGB")
+    if box is not None:
+        ImageDraw.Draw(overlay).rectangle(box, outline=(255, 210, 0), width=3)
+    return overlay
+
+
+def error_overlay(image, gt_mask, pred_mask, alpha, box):
+    image = image.convert("RGB")
+    tp = np.logical_and(gt_mask, pred_mask)
+    fp = np.logical_and(~gt_mask.astype(bool), pred_mask.astype(bool))
+    fn = np.logical_and(gt_mask.astype(bool), ~pred_mask.astype(bool))
+    overlay = Image.alpha_composite(image.convert("RGBA"), mask_rgba(tp, (0, 210, 90), alpha))
+    overlay = Image.alpha_composite(overlay, mask_rgba(fp, (230, 40, 40), alpha))
+    overlay = Image.alpha_composite(overlay, mask_rgba(fn, (40, 110, 255), alpha)).convert("RGB")
+    ImageDraw.Draw(overlay).rectangle(box, outline=(255, 210, 0), width=3)
+    return overlay
+
+
+def add_title(image, title):
+    pad = 24
+    canvas = Image.new("RGB", (image.width, image.height + pad), "white")
+    canvas.paste(image, (0, pad))
+    draw = ImageDraw.Draw(canvas)
+    draw.text((6, 5), title, fill=(20, 20, 20))
+    return canvas
+
+
+def resize_panel(image, width):
+    height = int(image.height * width / image.width)
+    return image.resize((width, height), Image.BILINEAR)
+
+
+def save_overview(vis_items, output_path, alpha, count):
+    if count <= 0 or not vis_items:
+        return
+    items = sorted(vis_items, key=lambda item: item["dice"])[:count]
+    panel_w = 240
+    rows = []
+    for item in items:
+        image = item["image"]
+        gt = item["gt_mask"]
+        pred = item["pred_mask"]
+        box = item["box"]
+        panels = [
+            add_title(resize_panel(image, panel_w), f"{item['idx']:03d} original"),
+            add_title(resize_panel(single_mask_overlay(image, gt, (0, 210, 90), alpha, box), panel_w), "GT"),
+            add_title(resize_panel(single_mask_overlay(image, pred, (230, 40, 40), alpha, box), panel_w), "Prediction"),
+            add_title(resize_panel(error_overlay(image, gt, pred, alpha, box), panel_w), f"Error Dice {item['dice']:.3f}"),
+        ]
+        row = Image.new("RGB", (sum(p.width for p in panels), max(p.height for p in panels)), "white")
+        x = 0
+        for panel in panels:
+            row.paste(panel, (x, 0))
+            x += panel.width
+        rows.append(row)
+    gap = 10
+    canvas = Image.new("RGB", (max(row.width for row in rows), sum(row.height for row in rows) + gap * (len(rows) - 1)), "white")
+    y = 0
+    for row in rows:
+        canvas.paste(row, (0, y))
+        y += row.height + gap
+    canvas.save(output_path)
 
 
 def main():
@@ -111,10 +176,15 @@ def main():
     threshold = float(arg_value("--threshold", "0.5"))
     threshold_sweep = parse_thresholds(arg_value("--threshold_sweep", ""))
     max_overlays = int(arg_value("--max_overlays", str(MAX_OVERLAYS)))
+    overlay_alpha = int(arg_value("--overlay_alpha", "90"))
+    overlay_top_k_worst = int(arg_value("--overlay_top_k_worst", "0"))
+    overview_count = int(arg_value("--overview_count", "0"))
 
     output_dir.mkdir(parents=True, exist_ok=True)
     overlay_dir = output_dir / "overlays"
     overlay_dir.mkdir(parents=True, exist_ok=True)
+    for old_overlay in overlay_dir.glob("*.png"):
+        old_overlay.unlink()
 
     processor = AutoProcessor.from_pretrained(base_model_path)
     base_model = Qwen3VLForConditionalGeneration.from_pretrained(
@@ -143,6 +213,7 @@ def main():
     samples = json.loads(annotation_path.read_text(encoding="utf-8"))
     rows = []
     sweep_rows = []
+    vis_items = []
     base_path = annotation_path.parent
     for idx, sample in enumerate(samples):
         source = dict(sample)
@@ -204,12 +275,28 @@ def main():
                 "bbox_2d": sample["bbox_2d"],
             }
         )
-
-        if idx < max_overlays:
-            overlay = overlay_image(image, gt_orig, pred_bin, sample["bbox_2d"])
-            overlay.save(overlay_dir / f"{idx:03d}_{Path(sample['image']).stem}.png")
+        vis_items.append(
+            {
+                "idx": idx,
+                "stem": Path(sample["image"]).stem,
+                "image": image,
+                "gt_mask": gt_orig.astype(bool),
+                "pred_mask": pred_bin.astype(bool),
+                "box": sample["bbox_2d"],
+                "dice": dice,
+            }
+        )
 
     df = pd.DataFrame(rows)
+    if max_overlays > 0:
+        if overlay_top_k_worst > 0:
+            selected_items = sorted(vis_items, key=lambda item: item["dice"])[:overlay_top_k_worst]
+        else:
+            selected_items = vis_items[:max_overlays]
+        for item in selected_items[:max_overlays]:
+            overlay = overlay_image(item["image"], item["gt_mask"], item["pred_mask"], item["box"], overlay_alpha)
+            overlay.save(overlay_dir / f"{item['idx']:03d}_{item['stem']}.png")
+    save_overview(vis_items, output_dir / "overview.png", overlay_alpha, overview_count)
     summary = {
         "annotation": str(annotation_path),
         "checkpoint": str(checkpoint_path),

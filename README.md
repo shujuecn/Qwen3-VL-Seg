@@ -277,16 +277,23 @@ python -m py_compile \
 
 ## 评估
 
-Phase 1 评估默认使用 JSON 中的 GT bbox，只验证 mask head 能力：
+当前最佳版本是 Phase 2B。评估默认使用 JSON 中的 GT bbox，只验证 box-guided mask head 能力：
 
 ```bash
 conda run --no-capture-output -n torch python qwen-vl-finetune/tools/eval_tongue_seg.py \
   --model_name_or_path /home/zyzd/.cache/modelscope/hub/models/Qwen/Qwen3-VL-4B-Instruct \
-  --checkpoint outputs/tongue_seg_phase1/model.safetensors \
+  --checkpoint outputs/tongue_seg_phase2b/model.safetensors \
   --annotation data/TongeImageDataset/val.json \
-  --output_dir outputs/tongue_seg_eval_val \
+  --output_dir outputs/tongue_seg_phase2b_eval_val \
   --seg_mask_size 256 \
-  --max_overlays 30
+  --seg_box_expand 0.15 \
+  --seg_box_alpha 20.0 \
+  --seg_use_highres_fusion True \
+  --seg_refine True \
+  --max_overlays 5 \
+  --overlay_top_k_worst 5 \
+  --overlay_alpha 85 \
+  --overview_count 5
 ```
 
 输出：
@@ -294,39 +301,37 @@ conda run --no-capture-output -n torch python qwen-vl-finetune/tools/eval_tongue
 - `summary.json`
 - `metrics.xlsx`
 - `predictions.jsonl`
-- `overlays/*.png`
+- `overlays/*.png`：最差样本透明 overlay
+- `overview.png`：多子图总览，适合放进演示文档
 
-当前已在 `data/TongeImageDataset/val.json` 上验证，结果见 `outputs/tongue_seg_eval_val/summary.json`。
-
-Phase 2 val 评估：
-
-```bash
-conda run --no-capture-output -n torch python qwen-vl-finetune/tools/eval_tongue_seg.py \
-  --model_name_or_path /home/zyzd/.cache/modelscope/hub/models/Qwen/Qwen3-VL-4B-Instruct \
-  --checkpoint outputs/tongue_seg_phase2/model.safetensors \
-  --annotation data/TongeImageDataset/val.json \
-  --output_dir outputs/tongue_seg_phase2_eval_val \
-  --seg_mask_size 256 \
-  --seg_box_expand 0.15 \
-  --seg_box_alpha 20.0 \
-  --seg_use_highres_fusion True \
-  --max_overlays 30
-```
-
-Phase 2 test 评估：
+test split 评估：
 
 ```bash
 conda run --no-capture-output -n torch python qwen-vl-finetune/tools/eval_tongue_seg.py \
   --model_name_or_path /home/zyzd/.cache/modelscope/hub/models/Qwen/Qwen3-VL-4B-Instruct \
-  --checkpoint outputs/tongue_seg_phase2/model.safetensors \
+  --checkpoint outputs/tongue_seg_phase2b/model.safetensors \
   --annotation data/TongeImageDataset/test.json \
-  --output_dir outputs/tongue_seg_phase2_eval_test \
+  --output_dir outputs/tongue_seg_phase2b_eval_test \
   --seg_mask_size 256 \
   --seg_box_expand 0.15 \
   --seg_box_alpha 20.0 \
   --seg_use_highres_fusion True \
-  --max_overlays 30
+  --seg_refine True \
+  --max_overlays 5 \
+  --overlay_top_k_worst 5 \
+  --overlay_alpha 85 \
+  --overview_count 5
 ```
+
+可视化示例：
+
+![Phase 2B val overview](outputs/tongue_seg_phase2b_eval_val/overview.png)
+
+![Phase 2B test overview](outputs/tongue_seg_phase2b_eval_test/overview.png)
+
+单张透明 overlay 示例：
+
+![Worst test overlay](outputs/tongue_seg_phase2b_eval_test/overlays/006_277.png)
 
 Phase 2A threshold sweep 已验证：
 
