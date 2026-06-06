@@ -1,0 +1,92 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Tongue Seg Train 2B Smoke",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/qwen-vl-finetune/qwenvl/train/train_qwen.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "--model_name_or_path", "/home/zyzd/.cache/modelscope/hub/models/Qwen/Qwen3-VL-2B-Instruct",
+        "--dataset_use", "tongue_seg",
+        "--seg_enable", "True",
+        "--seg_mask_size", "256",
+        "--seg_loss_weight", "1.0",
+        "--bf16", "True",
+        "--per_device_train_batch_size", "1",
+        "--gradient_accumulation_steps", "1",
+        "--max_steps", "3",
+        "--learning_rate", "1e-4",
+        "--output_dir", "outputs/tongue_seg_2b_debug",
+        "--logging_steps", "1",
+        "--save_strategy", "no"
+      ]
+    },
+    {
+      "name": "Tongue Seg Train 4B Smoke",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/qwen-vl-finetune/qwenvl/train/train_qwen.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "--model_name_or_path", "/home/zyzd/.cache/modelscope/hub/models/Qwen/Qwen3-VL-4B-Instruct",
+        "--dataset_use", "tongue_seg",
+        "--seg_enable", "True",
+        "--seg_mask_size", "256",
+        "--seg_loss_weight", "1.0",
+        "--bf16", "True",
+        "--per_device_train_batch_size", "1",
+        "--gradient_accumulation_steps", "1",
+        "--max_steps", "10",
+        "--learning_rate", "1e-4",
+        "--output_dir", "outputs/tongue_seg_4b_debug_smoke",
+        "--logging_steps", "1",
+        "--save_steps", "10",
+        "--save_total_limit", "2"
+      ]
+    },
+    {
+      "name": "Tongue Seg Train 4B Phase1",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/qwen-vl-finetune/qwenvl/train/train_qwen.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "--model_name_or_path", "/home/zyzd/.cache/modelscope/hub/models/Qwen/Qwen3-VL-4B-Instruct",
+        "--dataset_use", "tongue_seg",
+        "--seg_enable", "True",
+        "--seg_mask_size", "256",
+        "--seg_loss_weight", "1.0",
+        "--bf16", "True",
+        "--per_device_train_batch_size", "1",
+        "--gradient_accumulation_steps", "8",
+        "--num_train_epochs", "30",
+        "--learning_rate", "1e-4",
+        "--output_dir", "outputs/tongue_seg_phase1",
+        "--logging_steps", "10",
+        "--save_steps", "100",
+        "--save_total_limit", "3"
+      ]
+    },
+    {
+      "name": "Tongue Seg Eval Val",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/qwen-vl-finetune/tools/eval_tongue_seg.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "--model_name_or_path", "/home/zyzd/.cache/modelscope/hub/models/Qwen/Qwen3-VL-4B-Instruct",
+        "--checkpoint", "outputs/tongue_seg_phase1/model.safetensors",
+        "--annotation", "data/TongeImageDataset/val.json",
+        "--output_dir", "outputs/tongue_seg_eval_val",
+        "--seg_mask_size", "256",
+        "--max_overlays", "30"
+      ]
+    }
+  ]
+}

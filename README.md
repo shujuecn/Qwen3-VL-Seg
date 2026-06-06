@@ -79,6 +79,15 @@ Phase 1 只支持 dense Qwen3-VL，不支持 Qwen3-VL MoE、LoRA、`data_flatten
 
 当前环境的 `transformers + kernels` 组合会在导入 hub kernels 时触发 `Either a revision or a version must be specified`。训练脚本已在进程内屏蔽 broken `kernels` 包，并在没有 `flash_attn` 时自动使用 `sdpa`。
 
+VS Code debug 配置已写入 `.vscode/launch.json`，包含：
+
+- `Tongue Seg Train 2B Smoke`
+- `Tongue Seg Train 4B Smoke`
+- `Tongue Seg Train 4B Phase1`
+- `Tongue Seg Eval Val`
+
+使用 VS Code 运行这些配置时，建议选择 `torch` conda 环境对应的 Python 解释器。
+
 本机已用 2B 模型跑通 1 step smoke test。优先用 2B 验证链路：
 
 ```bash
@@ -148,8 +157,22 @@ conda run --no-capture-output -n torch python qwen-vl-finetune/qwenvl/train/trai
   --gradient_accumulation_steps 8 \
   --num_train_epochs 30 \
   --learning_rate 1e-4 \
-  --output_dir outputs/tongue_seg_phase1
+  --output_dir outputs/tongue_seg_phase1 \
+  --logging_steps 10 \
+  --save_steps 100 \
+  --save_total_limit 3
 ```
+
+`seg_enable=True` 时，如果未显式传入日志参数，训练脚本会默认使用：
+
+- `logging_steps=10`
+- `save_steps=100`
+- `save_total_limit=3`
+
+训练会额外输出：
+
+- `run_config.json`：运行配置、环境版本、git commit
+- `train_log.jsonl`：逐次日志记录，包含 `seg_loss`、`bce_loss`、`dice_loss`、预测/GT 面积比例
 
 ## 可行性验证
 
@@ -176,8 +199,33 @@ python -m py_compile \
 - 本地 Qwen3-VL-4B-Instruct 真实 1 step smoke test 通过，loss 正常输出。
 - 本地 Qwen3-VL-4B-Instruct 真实 10 step smoke test 通过，checkpoint 保存通过。
 - Phase 1 checkpoint 的 `model.safetensors` 只包含 `mask_head.*` 权重，不保存 frozen Qwen base。
+- 2B debug smoke 已验证 `train_log.jsonl` 每 step 记录分项 loss。
+- `outputs/tongue_seg_phase1/model.safetensors` 在 val split 上评估：Dice mean `0.9741`，mIoU mean `0.9497`。
 
 4B 10 step 和长训练可继续用上面的本地路径执行。
+
+## 评估
+
+Phase 1 评估默认使用 JSON 中的 GT bbox，只验证 mask head 能力：
+
+```bash
+conda run --no-capture-output -n torch python qwen-vl-finetune/tools/eval_tongue_seg.py \
+  --model_name_or_path /home/zyzd/.cache/modelscope/hub/models/Qwen/Qwen3-VL-4B-Instruct \
+  --checkpoint outputs/tongue_seg_phase1/model.safetensors \
+  --annotation data/TongeImageDataset/val.json \
+  --output_dir outputs/tongue_seg_eval_val \
+  --seg_mask_size 256 \
+  --max_overlays 30
+```
+
+输出：
+
+- `summary.json`
+- `metrics.xlsx`
+- `predictions.jsonl`
+- `overlays/*.png`
+
+当前已在 `data/TongeImageDataset/val.json` 上验证，结果见 `outputs/tongue_seg_eval_val/summary.json`。
 
 ## 当前实现位置
 
@@ -186,6 +234,7 @@ python -m py_compile \
 - mask/bbox 读取与 collator：`qwen-vl-finetune/qwenvl/data/data_processor.py`
 - 分割 wrapper：`qwen-vl-finetune/qwenvl/model/qwen3vl_seg.py`
 - 训练入口：`qwen-vl-finetune/qwenvl/train/train_qwen.py`
+- 评估脚本：`qwen-vl-finetune/tools/eval_tongue_seg.py`
 
 ## 下一步
 

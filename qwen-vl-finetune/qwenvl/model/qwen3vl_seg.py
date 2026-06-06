@@ -109,6 +109,23 @@ class Qwen3VLSegForConditionalGeneration(nn.Module):
         denom = probs.sum(dim=dims) + targets.sum(dim=dims)
         return (1 - (2 * intersection + 1.0) / (denom + 1.0)).mean()
 
+    def predict_masks(self, pixel_values, image_grid_thw, gt_boxes):
+        if pixel_values is None or image_grid_thw is None:
+            raise ValueError("segmentation prediction requires pixel_values and image_grid_thw")
+        if image_grid_thw.shape[0] != gt_boxes.shape[0]:
+            raise ValueError("phase 1 segmentation supports exactly one image per sample")
+
+        with torch.no_grad():
+            image_outputs = self.base_model.get_image_features(
+                pixel_values=pixel_values,
+                image_grid_thw=image_grid_thw,
+            )
+        image_features = self._image_features_to_tensor(image_outputs)
+        image_features = self._split_image_features(image_features, image_grid_thw)
+        gt_boxes = gt_boxes.to(device=image_features.device, dtype=image_features.dtype)
+        box_gate = self._box_gate(gt_boxes, self.seg_mask_size).to(dtype=image_features.dtype)
+        return self.mask_head(image_features, box_gate)
+
     def forward(
         self,
         input_ids=None,
@@ -143,33 +160,25 @@ class Qwen3VLSegForConditionalGeneration(nn.Module):
         if gt_masks is None or gt_boxes is None:
             return base_outputs
 
-        if pixel_values is None or image_grid_thw is None:
-            raise ValueError("segmentation training requires pixel_values and image_grid_thw")
-        if image_grid_thw.shape[0] != gt_masks.shape[0]:
-            raise ValueError("phase 1 segmentation supports exactly one image per sample")
-
-        with torch.no_grad():
-            image_outputs = self.base_model.get_image_features(
-                pixel_values=pixel_values,
-                image_grid_thw=image_grid_thw,
-            )
-        image_features = self._image_features_to_tensor(image_outputs)
-        image_features = self._split_image_features(image_features, image_grid_thw)
-
-        gt_masks = gt_masks.to(device=image_features.device, dtype=image_features.dtype)
-        gt_boxes = gt_boxes.to(device=image_features.device, dtype=image_features.dtype)
-        box_gate = self._box_gate(gt_boxes, self.seg_mask_size).to(dtype=image_features.dtype)
-
-        pred_masks = self.mask_head(image_features, box_gate)
+        pred_masks = self.predict_masks(pixel_values, image_grid_thw, gt_boxes)
+        gt_masks = gt_masks.to(device=pred_masks.device, dtype=pred_masks.dtype)
         bce_loss = F.binary_cross_entropy_with_logits(pred_masks, gt_masks)
         dice_loss = self._dice_loss(pred_masks, gt_masks)
         seg_loss = bce_loss + dice_loss
         loss = self.seg_loss_weight * seg_loss
+        with torch.no_grad():
+            probs = torch.sigmoid(pred_masks)
+            pred_area_ratio = (probs > 0.5).float().mean()
+            gt_area_ratio = gt_masks.float().mean()
 
         return {
             "loss": loss,
             "lm_loss": lm_loss,
             "seg_loss": seg_loss,
+            "bce_loss": bce_loss,
+            "dice_loss": dice_loss,
+            "pred_area_ratio": pred_area_ratio,
+            "gt_area_ratio": gt_area_ratio,
             "pred_masks": pred_masks,
             "logits": base_outputs.logits,
             "past_key_values": getattr(base_outputs, "past_key_values", None),

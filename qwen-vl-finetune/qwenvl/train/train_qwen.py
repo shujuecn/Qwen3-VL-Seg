@@ -17,6 +17,7 @@
 import os
 import logging
 import pathlib
+import json
 import torch
 import importlib.metadata
 
@@ -47,6 +48,7 @@ from qwenvl.train.argument import (
     DataArguments,
     TrainingArguments,
 )
+from qwenvl.train.seg_trainer import JsonlLogCallback, TongueSegTrainer, git_commit
 from transformers import AutoProcessor, Trainer
 
 local_rank = None
@@ -108,6 +110,39 @@ def resolve_attn_implementation(attn_implementation):
         return "sdpa"
 
 
+def configure_seg_defaults(training_args):
+    if training_args.logging_steps == 500:
+        training_args.logging_steps = 10
+    if training_args.save_steps == 500:
+        training_args.save_steps = 100
+    if training_args.save_total_limit is None:
+        training_args.save_total_limit = 3
+
+
+def save_run_config(output_dir, model_args, data_args, training_args, attn_implementation):
+    path = Path(output_dir) / "run_config.json"
+    config = {
+        "model_name_or_path": model_args.model_name_or_path,
+        "dataset_use": data_args.dataset_use,
+        "seg_mask_size": data_args.seg_mask_size,
+        "seg_enable": training_args.seg_enable,
+        "seg_loss_weight": training_args.seg_loss_weight,
+        "per_device_train_batch_size": training_args.per_device_train_batch_size,
+        "gradient_accumulation_steps": training_args.gradient_accumulation_steps,
+        "learning_rate": training_args.learning_rate,
+        "num_train_epochs": training_args.num_train_epochs,
+        "max_steps": training_args.max_steps,
+        "logging_steps": training_args.logging_steps,
+        "save_steps": training_args.save_steps,
+        "save_total_limit": training_args.save_total_limit,
+        "attn_implementation": attn_implementation,
+        "git_commit": git_commit(),
+        "torch_version": torch.__version__,
+        "transformers_version": transformers.__version__,
+    }
+    path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def train(attn_implementation="auto"):
     global local_rank
     attn_implementation = resolve_attn_implementation(attn_implementation)
@@ -124,6 +159,8 @@ def train(attn_implementation="auto"):
             raise ValueError("segmentation training does not support data_flatten or data_packing")
         if training_args.lora_enable:
             raise ValueError("phase 1 segmentation training does not support LoRA")
+        configure_seg_defaults(training_args)
+    save_run_config(training_args.output_dir, model_args, data_args, training_args, attn_implementation)
 
     if "qwen3" in model_args.model_name_or_path.lower() and "a" in Path(model_args.model_name_or_path.rstrip("/")).name.lower():
         if training_args.seg_enable:
@@ -234,8 +271,14 @@ def train(attn_implementation="auto"):
             model.model.print_trainable_parameters()
     
     data_module = make_supervised_data_module(processor, data_args=data_args)
-    trainer = Trainer(
-        model=model, processing_class=tokenizer, args=training_args, **data_module
+    trainer_cls = TongueSegTrainer if training_args.seg_enable else Trainer
+    callbacks = [JsonlLogCallback(training_args.output_dir)] if training_args.seg_enable else None
+    trainer = trainer_cls(
+        model=model,
+        processing_class=tokenizer,
+        args=training_args,
+        callbacks=callbacks,
+        **data_module,
     )
 
     checkpoints = list(pathlib.Path(training_args.output_dir).glob("checkpoint-*"))

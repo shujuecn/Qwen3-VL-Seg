@@ -29,4 +29,5 @@ materials/
 # OS/editor files
 .DS_Store
 .idea/
-.vscode/
+.vscode/*
+!.vscode/launch.json
