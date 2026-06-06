@@ -83,17 +83,19 @@ Phase 1 只支持 dense Qwen3-VL，不支持 Qwen3-VL MoE、LoRA、`data_flatten
 
 VS Code debug 配置已写入 `.vscode/launch.json`，包含：
 
-- `Tongue Seg Train 2B Smoke`
-- `Tongue Seg Train 4B Smoke`
-- `Tongue Seg Train 4B Phase1`
-- `Tongue Seg Eval Val`
-- `Tongue Seg Train 2B Phase2 Smoke`
-- `Tongue Seg Train 4B Phase2 Smoke`
-- `Tongue Seg Train 4B Phase2`
-- `Tongue Seg Eval Val Phase2`
-- `Tongue Seg Eval Test Phase2`
+- `Tongue Seg Debug 4B One Batch`：学习和断点调试入口，只跑 1 step，不保存 checkpoint。
+- `Tongue Seg Train 4B Phase2B`：当前最佳结构的正式训练入口。
+- `Tongue Seg Eval 4B Phase2B Val`：验证集评估与透明 overlay/overview 输出。
+- `Tongue Seg Eval 4B Phase2B Test`：测试集评估与透明 overlay/overview 输出。
 
 使用 VS Code 运行这些配置时，建议选择 `torch` conda 环境对应的 Python 解释器。
+
+推荐学习断点：
+
+- `qwen-vl-finetune/qwenvl/data/data_processor.py:250`，看 `gt_masks`、`gt_boxes`、`seg_images`。
+- `qwen-vl-finetune/qwenvl/model/qwen3vl_seg.py:184`，看 Qwen visual tokens 如何进入 mask head。
+- `qwen-vl-finetune/qwenvl/model/qwen3vl_seg.py:29`，看 high-res fusion 和 refinement。
+- `qwen-vl-finetune/tools/eval_tongue_seg.py:78`，看透明 overlay 和 overview 如何生成。
 
 本机已用 2B 模型跑通 1 step smoke test。优先用 2B 验证链路：
 
