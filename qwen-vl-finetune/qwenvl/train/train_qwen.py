@@ -127,6 +127,10 @@ def save_run_config(output_dir, model_args, data_args, training_args, attn_imple
         "seg_mask_size": data_args.seg_mask_size,
         "seg_enable": training_args.seg_enable,
         "seg_loss_weight": training_args.seg_loss_weight,
+        "seg_box_expand": training_args.seg_box_expand,
+        "seg_box_alpha": training_args.seg_box_alpha,
+        "seg_use_highres_fusion": training_args.seg_use_highres_fusion,
+        "seg_refine": training_args.seg_refine,
         "per_device_train_batch_size": training_args.per_device_train_batch_size,
         "gradient_accumulation_steps": training_args.gradient_accumulation_steps,
         "learning_rate": training_args.learning_rate,
@@ -241,6 +245,10 @@ def train(attn_implementation="auto"):
             model,
             seg_mask_size=data_args.seg_mask_size,
             seg_loss_weight=training_args.seg_loss_weight,
+            seg_box_expand=training_args.seg_box_expand,
+            seg_box_alpha=training_args.seg_box_alpha,
+            seg_use_highres_fusion=training_args.seg_use_highres_fusion,
+            seg_refine=training_args.seg_refine,
         )
         if torch.distributed.is_available() and torch.distributed.is_initialized():
             if torch.distributed.get_rank() == 0:

@@ -61,6 +61,12 @@ def binary_metrics(pred, target):
     return float(dice), float(iou)
 
 
+def parse_thresholds(value):
+    if not value:
+        return []
+    return [float(item) for item in value.split(",") if item.strip()]
+
+
 def make_messages(source, processor):
     data = preprocess_qwen_visual([source], processor)
     grid_thw = data["image_grid_thw"]
@@ -97,6 +103,13 @@ def main():
     annotation_path = Path(arg_value("--annotation", ANNOTATION))
     output_dir = Path(arg_value("--output_dir", OUTPUT_DIR))
     mask_size = int(arg_value("--seg_mask_size", str(MASK_SIZE)))
+    seg_box_expand = float(arg_value("--seg_box_expand", "0.0"))
+    seg_box_alpha = float(arg_value("--seg_box_alpha", "0.0"))
+    seg_use_highres_fusion = arg_value("--seg_use_highres_fusion", "False").lower() == "true"
+    seg_refine = arg_value("--seg_refine", "False").lower() == "true"
+    strict_load = arg_value("--strict_load", "True").lower() == "true"
+    threshold = float(arg_value("--threshold", "0.5"))
+    threshold_sweep = parse_thresholds(arg_value("--threshold_sweep", ""))
     max_overlays = int(arg_value("--max_overlays", str(MAX_OVERLAYS)))
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -109,19 +122,27 @@ def main():
         attn_implementation="sdpa",
         dtype=torch.bfloat16 if torch.cuda.is_available() else None,
     )
-    model = Qwen3VLSegForConditionalGeneration(base_model, seg_mask_size=mask_size)
+    model = Qwen3VLSegForConditionalGeneration(
+        base_model,
+        seg_mask_size=mask_size,
+        seg_box_expand=seg_box_expand,
+        seg_box_alpha=seg_box_alpha,
+        seg_use_highres_fusion=seg_use_highres_fusion,
+        seg_refine=seg_refine,
+    )
     state = torch.load(checkpoint_path, map_location="cpu") if checkpoint_path.suffix == ".pt" else None
     if state is None:
         from safetensors.torch import load_file
 
         state = load_file(str(checkpoint_path))
-    model.load_state_dict(state, strict=True)
+    model.load_state_dict(state, strict=strict_load)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     model.eval()
 
     samples = json.loads(annotation_path.read_text(encoding="utf-8"))
     rows = []
+    sweep_rows = []
     base_path = annotation_path.parent
     for idx, sample in enumerate(samples):
         source = dict(sample)
@@ -136,8 +157,14 @@ def main():
             "image_grid_thw": data["image_grid_thw"].to(device),
         }
         gt_boxes = seg["gt_boxes"][None].to(device)
+        seg_images = seg["seg_images"][None].to(device)
         with torch.no_grad():
-            logits = model.predict_masks(inputs["pixel_values"], inputs["image_grid_thw"], gt_boxes)
+            logits = model.predict_masks(
+                inputs["pixel_values"],
+                inputs["image_grid_thw"],
+                gt_boxes,
+                seg_images=seg_images,
+            )
             probs = torch.sigmoid(logits)[0, 0].float().cpu()
 
         image = Image.open(base_path / sample["image"]).convert("RGB")
@@ -148,13 +175,28 @@ def main():
             mode="bilinear",
             align_corners=False,
         )[0, 0].numpy()
-        pred_bin = (pred_orig >= 0.5).astype(np.uint8)
+        pred_bin = (pred_orig >= threshold).astype(np.uint8)
         dice, iou = binary_metrics(pred_bin, gt_orig)
+        for item_threshold in threshold_sweep:
+            sweep_pred = (pred_orig >= item_threshold).astype(np.uint8)
+            sweep_dice, sweep_iou = binary_metrics(sweep_pred, gt_orig)
+            sweep_rows.append(
+                {
+                    "idx": idx,
+                    "image": sample["image"],
+                    "threshold": item_threshold,
+                    "dice": sweep_dice,
+                    "miou": sweep_iou,
+                    "pred_area_ratio": float(sweep_pred.mean()),
+                    "gt_area_ratio": float(gt_orig.mean()),
+                }
+            )
         rows.append(
             {
                 "idx": idx,
                 "image": sample["image"],
                 "mask": sample["mask"],
+                "threshold": threshold,
                 "dice": dice,
                 "miou": iou,
                 "pred_area_ratio": float(pred_bin.mean()),
@@ -171,6 +213,7 @@ def main():
     summary = {
         "annotation": str(annotation_path),
         "checkpoint": str(checkpoint_path),
+        "threshold": threshold,
         "samples": len(rows),
         "dice_mean": float(df["dice"].mean()),
         "dice_median": float(df["dice"].median()),
@@ -179,6 +222,30 @@ def main():
         "pred_area_ratio_mean": float(df["pred_area_ratio"].mean()),
         "gt_area_ratio_mean": float(df["gt_area_ratio"].mean()),
     }
+    if sweep_rows:
+        sweep_df = pd.DataFrame(sweep_rows)
+        threshold_df = (
+            sweep_df.groupby("threshold", as_index=False)
+            .agg(
+                dice_mean=("dice", "mean"),
+                dice_median=("dice", "median"),
+                miou_mean=("miou", "mean"),
+                miou_median=("miou", "median"),
+                pred_area_ratio_mean=("pred_area_ratio", "mean"),
+                gt_area_ratio_mean=("gt_area_ratio", "mean"),
+            )
+            .sort_values(["dice_mean", "miou_mean"], ascending=False)
+        )
+        best = threshold_df.iloc[0].to_dict()
+        summary["best_threshold"] = float(best["threshold"])
+        summary["best_threshold_dice_mean"] = float(best["dice_mean"])
+        summary["best_threshold_miou_mean"] = float(best["miou_mean"])
+        sweep_df.to_json(output_dir / "threshold_predictions.jsonl", orient="records", lines=True, force_ascii=False)
+        threshold_df.to_excel(output_dir / "threshold_sweep.xlsx", index=False)
+        (output_dir / "threshold_sweep.json").write_text(
+            json.dumps(threshold_df.to_dict(orient="records"), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
     (output_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     df.to_json(output_dir / "predictions.jsonl", orient="records", lines=True, force_ascii=False)
     df.to_excel(output_dir / "metrics.xlsx", index=False)

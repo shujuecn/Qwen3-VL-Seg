@@ -40,6 +40,10 @@ class TrainingArguments(transformers.TrainingArguments):
     vision_tower_lr: Optional[float] = None
     seg_enable: bool = field(default=False)
     seg_loss_weight: float = field(default=1.0)
+    seg_box_expand: float = field(default=0.0)
+    seg_box_alpha: float = field(default=0.0)
+    seg_use_highres_fusion: bool = field(default=False)
+    seg_refine: bool = field(default=False)
 
     ## Lora config
     lora_enable: bool = field(default=False)

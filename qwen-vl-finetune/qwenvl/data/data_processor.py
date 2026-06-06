@@ -250,6 +250,7 @@ def preprocess_qwen_visual(
 def load_seg_fields(source: Dict[str, Any], mask_size: int) -> Dict[str, torch.Tensor]:
     base_path = Path(source.get("data_path", ""))
     mask_path = base_path / source["mask"]
+    image_path = base_path / source["image"]
     if "bbox_2d" not in source:
         raise ValueError(f"missing bbox_2d for segmentation sample: {source}")
 
@@ -263,6 +264,10 @@ def load_seg_fields(source: Dict[str, Any], mask_size: int) -> Dict[str, torch.T
         size=(mask_size, mask_size),
         mode="nearest",
     )[0]
+    image = Image.open(image_path).convert("RGB")
+    image.load()
+    image_np = np.array(image.resize((mask_size, mask_size), Image.BILINEAR), dtype=np.float32)
+    seg_image = torch.from_numpy(image_np).permute(2, 0, 1) / 255.0
 
     x1, y1, x2, y2 = source["bbox_2d"]
     box = torch.tensor(
@@ -275,6 +280,7 @@ def load_seg_fields(source: Dict[str, Any], mask_size: int) -> Dict[str, torch.T
     return {
         "gt_masks": mask,
         "gt_boxes": box,
+        "seg_images": seg_image,
         "orig_size": torch.tensor([height, width], dtype=torch.long),
     }
 
@@ -642,6 +648,7 @@ class DataCollatorForSupervisedDataset(object):
         if any("gt_masks" in instance for instance in instances):
             batch["gt_masks"] = torch.stack([instance["gt_masks"] for instance in instances])
             batch["gt_boxes"] = torch.stack([instance["gt_boxes"] for instance in instances])
+            batch["seg_images"] = torch.stack([instance["seg_images"] for instance in instances])
             batch["orig_size"] = torch.stack([instance["orig_size"] for instance in instances])
         return batch
 

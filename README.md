@@ -4,6 +4,8 @@
 
 当前实现是 Phase 1：先跑通数据、训练入口、最小 mask head 和 smoke test。它不是完整复现论文的 17M box-guided decoder，也不做开放世界 referring segmentation。
 
+Phase 2A 已加入 soft bbox gate 和高分辨率 RGB 浅层融合。为了保留 Phase 1 baseline，Phase 2 功能默认不开启，需要在命令中显式传参。
+
 原始上游 README 已保留为 `README_QWEN3VL_ORIGINAL.md`。
 
 ## 思路
@@ -85,6 +87,11 @@ VS Code debug 配置已写入 `.vscode/launch.json`，包含：
 - `Tongue Seg Train 4B Smoke`
 - `Tongue Seg Train 4B Phase1`
 - `Tongue Seg Eval Val`
+- `Tongue Seg Train 2B Phase2 Smoke`
+- `Tongue Seg Train 4B Phase2 Smoke`
+- `Tongue Seg Train 4B Phase2`
+- `Tongue Seg Eval Val Phase2`
+- `Tongue Seg Eval Test Phase2`
 
 使用 VS Code 运行这些配置时，建议选择 `torch` conda 环境对应的 Python 解释器。
 
@@ -163,6 +170,57 @@ conda run --no-capture-output -n torch python qwen-vl-finetune/qwenvl/train/trai
   --save_total_limit 3
 ```
 
+Phase 2A 在 Phase 1 基础上开启：
+
+- `seg_box_expand=0.15`：bbox 宽高外扩 15%。
+- `seg_box_alpha=20.0`：sigmoid soft boundary 系数。
+- `seg_use_highres_fusion=True`：启用 `256x256` RGB shallow image stem。
+
+2B Phase 2 smoke：
+
+```bash
+conda run --no-capture-output -n torch python qwen-vl-finetune/qwenvl/train/train_qwen.py \
+  --model_name_or_path /home/zyzd/.cache/modelscope/hub/models/Qwen/Qwen3-VL-2B-Instruct \
+  --dataset_use tongue_seg \
+  --seg_enable True \
+  --seg_mask_size 256 \
+  --seg_loss_weight 1.0 \
+  --seg_box_expand 0.15 \
+  --seg_box_alpha 20.0 \
+  --seg_use_highres_fusion True \
+  --bf16 True \
+  --per_device_train_batch_size 1 \
+  --gradient_accumulation_steps 1 \
+  --max_steps 3 \
+  --learning_rate 1e-4 \
+  --output_dir outputs/tongue_seg_2b_phase2_smoke \
+  --save_strategy no \
+  --logging_steps 1
+```
+
+4B Phase 2 正式训练：
+
+```bash
+conda run --no-capture-output -n torch python qwen-vl-finetune/qwenvl/train/train_qwen.py \
+  --model_name_or_path /home/zyzd/.cache/modelscope/hub/models/Qwen/Qwen3-VL-4B-Instruct \
+  --dataset_use tongue_seg \
+  --seg_enable True \
+  --seg_mask_size 256 \
+  --seg_loss_weight 1.0 \
+  --seg_box_expand 0.15 \
+  --seg_box_alpha 20.0 \
+  --seg_use_highres_fusion True \
+  --bf16 True \
+  --per_device_train_batch_size 1 \
+  --gradient_accumulation_steps 8 \
+  --num_train_epochs 30 \
+  --learning_rate 1e-4 \
+  --output_dir outputs/tongue_seg_phase2 \
+  --logging_steps 10 \
+  --save_steps 100 \
+  --save_total_limit 3
+```
+
 `seg_enable=True` 时，如果未显式传入日志参数，训练脚本会默认使用：
 
 - `logging_steps=10`
@@ -173,6 +231,12 @@ conda run --no-capture-output -n torch python qwen-vl-finetune/qwenvl/train/trai
 
 - `run_config.json`：运行配置、环境版本、git commit
 - `train_log.jsonl`：逐次日志记录，包含 `seg_loss`、`bce_loss`、`dice_loss`、预测/GT 面积比例
+
+输出清理策略：
+
+- 保留正式训练目录的 `model.safetensors`、`run_config.json`、`train_log.jsonl`、tokenizer/processor 配置。
+- 保留正式评估目录的 `summary.json`、`metrics.xlsx`、`predictions.jsonl` 和必要 overlay。
+- 训练中间 `checkpoint-*`、smoke 输出、compat 评估输出可以删除。
 
 ## 可行性验证
 
@@ -185,8 +249,10 @@ python -m py_compile \
   qwen-vl-finetune/qwenvl/data/data_processor.py \
   qwen-vl-finetune/qwenvl/train/argument.py \
   qwen-vl-finetune/qwenvl/train/train_qwen.py \
+  qwen-vl-finetune/qwenvl/train/seg_trainer.py \
   qwen-vl-finetune/qwenvl/model/__init__.py \
-  qwen-vl-finetune/qwenvl/model/qwen3vl_seg.py
+  qwen-vl-finetune/qwenvl/model/qwen3vl_seg.py \
+  qwen-vl-finetune/tools/eval_tongue_seg.py
 ```
 
 已验证：
@@ -201,6 +267,11 @@ python -m py_compile \
 - Phase 1 checkpoint 的 `model.safetensors` 只包含 `mask_head.*` 权重，不保存 frozen Qwen base。
 - 2B debug smoke 已验证 `train_log.jsonl` 每 step 记录分项 loss。
 - `outputs/tongue_seg_phase1/model.safetensors` 在 val split 上评估：Dice mean `0.9741`，mIoU mean `0.9497`。
+- Phase 2A 2B/4B smoke test 通过，checkpoint 只包含 `mask_head.*`。
+- `outputs/tongue_seg_phase2/model.safetensors` 在 val split 上评估：Dice mean `0.9741`，mIoU mean `0.9498`。
+- `outputs/tongue_seg_phase2/model.safetensors` 在 test split 上评估：Dice mean `0.9726`，mIoU mean `0.9469`。
+- `outputs/tongue_seg_phase2b/model.safetensors` 在 val split 上评估：Dice mean `0.9764`，mIoU mean `0.9541`。
+- `outputs/tongue_seg_phase2b/model.safetensors` 在 test split 上评估：Dice mean `0.9753`，mIoU mean `0.9520`。
 
 4B 10 step 和长训练可继续用上面的本地路径执行。
 
@@ -227,6 +298,79 @@ conda run --no-capture-output -n torch python qwen-vl-finetune/tools/eval_tongue
 
 当前已在 `data/TongeImageDataset/val.json` 上验证，结果见 `outputs/tongue_seg_eval_val/summary.json`。
 
+Phase 2 val 评估：
+
+```bash
+conda run --no-capture-output -n torch python qwen-vl-finetune/tools/eval_tongue_seg.py \
+  --model_name_or_path /home/zyzd/.cache/modelscope/hub/models/Qwen/Qwen3-VL-4B-Instruct \
+  --checkpoint outputs/tongue_seg_phase2/model.safetensors \
+  --annotation data/TongeImageDataset/val.json \
+  --output_dir outputs/tongue_seg_phase2_eval_val \
+  --seg_mask_size 256 \
+  --seg_box_expand 0.15 \
+  --seg_box_alpha 20.0 \
+  --seg_use_highres_fusion True \
+  --max_overlays 30
+```
+
+Phase 2 test 评估：
+
+```bash
+conda run --no-capture-output -n torch python qwen-vl-finetune/tools/eval_tongue_seg.py \
+  --model_name_or_path /home/zyzd/.cache/modelscope/hub/models/Qwen/Qwen3-VL-4B-Instruct \
+  --checkpoint outputs/tongue_seg_phase2/model.safetensors \
+  --annotation data/TongeImageDataset/test.json \
+  --output_dir outputs/tongue_seg_phase2_eval_test \
+  --seg_mask_size 256 \
+  --seg_box_expand 0.15 \
+  --seg_box_alpha 20.0 \
+  --seg_use_highres_fusion True \
+  --max_overlays 30
+```
+
+Phase 2A threshold sweep 已验证：
+
+- val 最优阈值仍为 `0.50`。
+- test 最优阈值为 `0.45`，但 Dice mean 只从 `0.972597` 到 `0.972675`，提升很小。
+- 结论：当前主要瓶颈不是二值化阈值，而是边界 refinement。
+
+Phase 2B 增加 mask-aware refinement，默认不开启。4B 正式训练命令：
+
+```bash
+conda run --no-capture-output -n torch python qwen-vl-finetune/qwenvl/train/train_qwen.py \
+  --model_name_or_path /home/zyzd/.cache/modelscope/hub/models/Qwen/Qwen3-VL-4B-Instruct \
+  --dataset_use tongue_seg \
+  --seg_enable True \
+  --seg_mask_size 256 \
+  --seg_loss_weight 1.0 \
+  --seg_box_expand 0.15 \
+  --seg_box_alpha 20.0 \
+  --seg_use_highres_fusion True \
+  --seg_refine True \
+  --bf16 True \
+  --per_device_train_batch_size 1 \
+  --gradient_accumulation_steps 8 \
+  --num_train_epochs 30 \
+  --learning_rate 1e-4 \
+  --output_dir outputs/tongue_seg_phase2b \
+  --logging_steps 10 \
+  --save_steps 300 \
+  --save_total_limit 1
+```
+
+当前对比结果：
+
+| phase | split | Dice mean | mIoU mean |
+| --- | --- | ---: | ---: |
+| Phase 1 | val | 0.9741 | 0.9497 |
+| Phase 1 | test | 0.9713 | 0.9444 |
+| Phase 2A | val | 0.9741 | 0.9498 |
+| Phase 2A | test | 0.9726 | 0.9469 |
+| Phase 2B | val | 0.9764 | 0.9541 |
+| Phase 2B | test | 0.9753 | 0.9520 |
+
+Phase 2B 是当前最好版本。它相比 Phase 2A 在 val/test 都有明确提升，但 test 最差样本仍是 `origin_Image/277.png`，Dice `0.9265`，主要表现为大舌体边缘欠分割。
+
 ## 当前实现位置
 
 - 数据生成：`qwen-vl-finetune/tools/build_tongue_seg_json.py`
@@ -238,10 +382,10 @@ conda run --no-capture-output -n torch python qwen-vl-finetune/tools/eval_tongue
 
 ## 下一步
 
-Phase 2 再考虑加入论文里的关键增强：
+Phase 2A 已实现：
 
 - bbox soft gate 扩大 15% 与 sigmoid soft boundary
 - shallow image stem
 - high-resolution pixel fusion
-- mask-aware refinement
-- Dice/mIoU 评估脚本与 overlay 输出
+
+Phase 2B 已实现可选 mask-aware refinement，并已完成正式训练和 val/test 评估。下一步优先针对 `origin_Image/277.png` 这类大舌体边界欠分割样本做边界诊断，再考虑加入边界 loss 或 bbox 边缘采样。
