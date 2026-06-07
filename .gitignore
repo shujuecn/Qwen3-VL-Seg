@@ -14,11 +14,17 @@ outputs/
 checkpoints/
 runs/
 wandb/
+
 *.log
 *.safetensors
 *.pt
 *.pth
 *.bin
+
+# Agent
+.claude/
+.codex/
+.agents/
 
 # Local raw datasets
 data/TongeImageDataset/origin_Image/
