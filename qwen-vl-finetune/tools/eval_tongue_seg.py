@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sys
 import importlib.metadata
 from pathlib import Path
@@ -38,6 +39,7 @@ ANNOTATION = "data/TongeImageDataset/val.json"
 OUTPUT_DIR = "outputs/tongue_seg_eval"
 MASK_SIZE = 256
 MAX_OVERLAYS = 30
+PROMPT = "<image>\nLocate and segment the tongue, report bbox coordinates and mask in JSON format."
 
 
 def arg_value(name, default):
@@ -49,16 +51,99 @@ def arg_value(name, default):
     return sys.argv[idx + 1]
 
 
+def bool_arg(name, default):
+    return str(arg_value(name, str(default))).lower() == "true"
+
+
+def load_run_config(checkpoint_path):
+    config_path = checkpoint_path.parent / "run_config.json"
+    if not config_path.exists():
+        return {}
+    return json.loads(config_path.read_text(encoding="utf-8"))
+
+
 def binary_metrics(pred, target):
     pred = pred.astype(bool)
     target = target.astype(bool)
-    inter = np.logical_and(pred, target).sum()
-    union = np.logical_or(pred, target).sum()
-    pred_sum = pred.sum()
-    target_sum = target.sum()
+    inter = int(np.logical_and(pred, target).sum())
+    union = int(np.logical_or(pred, target).sum())
+    pred_sum = int(pred.sum())
+    target_sum = int(target.sum())
     dice = (2 * inter + 1.0) / (pred_sum + target_sum + 1.0)
-    iou = (inter + 1.0) / (union + 1.0)
-    return float(dice), float(iou)
+    miou = (inter + 1.0) / (union + 1.0)
+    iou = inter / union if union > 0 else 1.0
+    return float(dice), float(miou), float(iou), inter, union, pred_sum, target_sum
+
+
+def parse_box(value):
+    nums = [float(x) for x in re.findall(r"-?\d+(?:\.\d+)?", value)]
+    if len(nums) != 4:
+        raise ValueError(f"expected 4 bbox numbers, got: {value}")
+    return nums
+
+
+def parse_generated_bbox(text):
+    match = re.search(r"""["']bbox_2d["']\s*:\s*\[([^\]]+)\]""", text)
+    if not match:
+        raise ValueError(f"could not find bbox_2d in generated text: {text}")
+    return parse_box(match.group(1))
+
+
+def normalize_box(box, width, height):
+    if max(box) <= 1.0:
+        norm = torch.tensor(box, dtype=torch.float32)
+    else:
+        norm = torch.tensor(
+            [box[0] / width, box[1] / height, box[2] / width, box[3] / height],
+            dtype=torch.float32,
+        )
+    norm = norm.clamp(0, 1)
+    if norm[2] <= norm[0] or norm[3] <= norm[1]:
+        raise ValueError(f"invalid bbox after normalization: {box}")
+    return norm
+
+
+def box_to_pixels(box, width, height):
+    if max(box) <= 1.0:
+        x1, y1, x2, y2 = box[0] * width, box[1] * height, box[2] * width, box[3] * height
+    else:
+        x1, y1, x2, y2 = box
+    x1 = min(max(int(round(x1)), 0), width)
+    y1 = min(max(int(round(y1)), 0), height)
+    x2 = min(max(int(round(x2)), 0), width)
+    y2 = min(max(int(round(y2)), 0), height)
+    return [x1, y1, x2, y2]
+
+
+def bbox_iou(box_a, box_b):
+    ax1, ay1, ax2, ay2 = [float(x) for x in box_a]
+    bx1, by1, bx2, by2 = [float(x) for x in box_b]
+    inter_w = max(0.0, min(ax2, bx2) - max(ax1, bx1))
+    inter_h = max(0.0, min(ay2, by2) - max(ay1, by1))
+    inter = inter_w * inter_h
+    area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+    area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+
+def jitter_box(box, amount, rng):
+    if amount <= 0:
+        return box.clone()
+    x1, y1, x2, y2 = [float(v) for v in box.tolist()]
+    w = x2 - x1
+    h = y2 - y1
+    cx = (x1 + x2) * 0.5 + rng.uniform(-amount, amount) * w
+    cy = (y1 + y2) * 0.5 + rng.uniform(-amount, amount) * h
+    w = max(1e-4, w * (1.0 + rng.uniform(-amount, amount)))
+    h = max(1e-4, h * (1.0 + rng.uniform(-amount, amount)))
+    out = torch.tensor(
+        [cx - w * 0.5, cy - h * 0.5, cx + w * 0.5, cy + h * 0.5],
+        dtype=torch.float32,
+    ).clamp(0, 1)
+    if out[2] <= out[0] or out[3] <= out[1]:
+        return box.clone()
+    return out
 
 
 def parse_thresholds(value):
@@ -79,6 +164,42 @@ def make_messages(source, processor):
     )
     data["position_ids"] = position_ids
     return data
+
+
+def make_generation_inputs(image, processor):
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image", "image": image},
+                {"type": "text", "text": PROMPT.replace("<image>\n", "")},
+            ],
+        }
+    ]
+    return processor.apply_chat_template(
+        messages,
+        tokenize=True,
+        return_dict=True,
+        return_tensors="pt",
+        add_generation_prompt=True,
+    )
+
+
+def to_device(batch, device):
+    return {key: value.to(device) if torch.is_tensor(value) else value for key, value in batch.items()}
+
+
+def generate_bbox(model, processor, image, device, max_new_tokens):
+    inputs = to_device(make_generation_inputs(image, processor), device)
+    input_len = inputs["input_ids"].shape[-1]
+    with torch.no_grad():
+        output_ids = model.base_model.generate(
+            **inputs,
+            do_sample=False,
+            max_new_tokens=max_new_tokens,
+        )
+    text = processor.tokenizer.decode(output_ids[0, input_len:], skip_special_tokens=True)
+    return text, inputs
 
 
 def mask_rgba(mask, color, alpha):
@@ -162,23 +283,91 @@ def save_overview(vis_items, output_path, alpha, count):
     canvas.save(output_path)
 
 
+def write_failure_cases(rows, output_path, count):
+    if count <= 0 or not rows:
+        return
+    cases = []
+    valid_rows = [
+        row
+        for row in rows
+        if row.get("bbox_parse_success", True) and row.get("dice") is not None and not pd.isna(row["dice"])
+    ]
+    for row in sorted(valid_rows, key=lambda item: item["dice"])[:count]:
+        delta = row["pred_area_ratio"] - row["gt_area_ratio"]
+        failure_modes = []
+        if delta < -0.015:
+            failure_modes.extend(["tongue_area_too_small", "tongue_tip_or_edge_missing"])
+            note = "Prediction area is smaller than GT; inspect overlay for missed tongue edge or tip."
+        elif delta > 0.015:
+            failure_modes.extend(["tongue_area_too_large", "tongue_boundary_expansion"])
+            note = "Prediction area is larger than GT; inspect overlay for mild boundary expansion."
+        else:
+            failure_modes.append("local_boundary_error")
+            note = "Area ratio is close to GT; remaining error is mostly local boundary mismatch."
+        if row["dice"] < 0.96:
+            failure_modes.append("manual_review_for_lip_teeth_background_or_lighting")
+        cases.append(
+            {
+                "idx": row["idx"],
+                "image": row["image"],
+                "mask": row["mask"],
+                "dice": row["dice"],
+                "miou": row["miou"],
+                "pred_area_ratio": row["pred_area_ratio"],
+                "gt_area_ratio": row["gt_area_ratio"],
+                "area_delta": delta,
+                "bbox_2d": row["bbox_2d"],
+                "eval_bbox_2d": row.get("eval_bbox_2d"),
+                "bbox_iou": row.get("bbox_iou"),
+                "failure_modes": failure_modes,
+                "note": note,
+            }
+        )
+    summary = {
+        "selection": f"{len(cases)} lowest Dice samples",
+        "review_categories": [
+            "tongue_tip_or_edge_missing",
+            "tongue_boundary_expansion",
+            "lip_teeth_or_background_false_positive",
+            "lighting_abnormal",
+            "tongue_area_too_small",
+            "tongue_area_too_large",
+        ],
+        "main_observation": "Residual errors are dominated by local tongue boundary mismatch and mild under-segmentation; inspect overlays for lip, teeth, background, or lighting failures.",
+        "cases": cases,
+    }
+    output_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def main():
-    base_model_path = arg_value("--model_name_or_path", BASE_MODEL)
     checkpoint_path = Path(arg_value("--checkpoint", CHECKPOINT))
+    config = load_run_config(checkpoint_path)
+    base_model_path = arg_value("--model_name_or_path", config.get("model_name_or_path", BASE_MODEL))
     annotation_path = Path(arg_value("--annotation", ANNOTATION))
     output_dir = Path(arg_value("--output_dir", OUTPUT_DIR))
-    mask_size = int(arg_value("--seg_mask_size", str(MASK_SIZE)))
-    seg_box_expand = float(arg_value("--seg_box_expand", "0.0"))
-    seg_box_alpha = float(arg_value("--seg_box_alpha", "0.0"))
-    seg_use_highres_fusion = arg_value("--seg_use_highres_fusion", "False").lower() == "true"
-    seg_refine = arg_value("--seg_refine", "False").lower() == "true"
+    mask_size = int(arg_value("--seg_mask_size", config.get("seg_mask_size", MASK_SIZE)))
+    seg_box_expand = float(arg_value("--seg_box_expand", config.get("seg_box_expand", 0.0)))
+    seg_box_alpha = float(arg_value("--seg_box_alpha", config.get("seg_box_alpha", 0.0)))
+    seg_use_highres_fusion = bool_arg("--seg_use_highres_fusion", config.get("seg_use_highres_fusion", False))
+    seg_refine = bool_arg("--seg_refine", config.get("seg_refine", False))
+    seg_use_box_film = bool_arg("--seg_use_box_film", config.get("seg_use_box_film", False))
+    seg_box_fourier_bands = int(arg_value("--seg_box_fourier_bands", config.get("seg_box_fourier_bands", 8)))
     strict_load = arg_value("--strict_load", "True").lower() == "true"
     threshold = float(arg_value("--threshold", "0.5"))
     threshold_sweep = parse_thresholds(arg_value("--threshold_sweep", ""))
+    bbox_source = arg_value("--bbox_source", "gt")
+    bbox_jitter = float(arg_value("--bbox_jitter", "0.0"))
+    bbox_jitter_seed = int(arg_value("--bbox_jitter_seed", "0"))
+    max_new_tokens = int(arg_value("--max_new_tokens", "128"))
     max_overlays = int(arg_value("--max_overlays", str(MAX_OVERLAYS)))
     overlay_alpha = int(arg_value("--overlay_alpha", "90"))
     overlay_top_k_worst = int(arg_value("--overlay_top_k_worst", "0"))
     overview_count = int(arg_value("--overview_count", "0"))
+    failure_cases_count = int(arg_value("--failure_cases_count", "10"))
+    if bbox_source not in {"gt", "generated"}:
+        raise ValueError("--bbox_source must be gt or generated")
+    if bbox_source == "generated" and bbox_jitter > 0:
+        raise ValueError("--bbox_jitter is only supported with --bbox_source gt")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     overlay_dir = output_dir / "overlays"
@@ -199,6 +388,8 @@ def main():
         seg_box_alpha=seg_box_alpha,
         seg_use_highres_fusion=seg_use_highres_fusion,
         seg_refine=seg_refine,
+        seg_use_box_film=seg_use_box_film,
+        seg_box_fourier_bands=seg_box_fourier_bands,
     )
     state = torch.load(checkpoint_path, map_location="cpu") if checkpoint_path.suffix == ".pt" else None
     if state is None:
@@ -215,31 +406,70 @@ def main():
     sweep_rows = []
     vis_items = []
     base_path = annotation_path.parent
+    rng = np.random.default_rng(bbox_jitter_seed)
     for idx, sample in enumerate(samples):
         source = dict(sample)
         source["data_path"] = str(base_path)
-        data = make_messages(source, processor)
         seg = load_seg_fields(source, mask_size)
-        inputs = {
-            "input_ids": data["input_ids"].to(device),
-            "attention_mask": torch.ones_like(data["input_ids"], dtype=torch.bool).to(device),
-            "position_ids": data["position_ids"].to(device),
-            "pixel_values": data["pixel_values"].to(device),
-            "image_grid_thw": data["image_grid_thw"].to(device),
-        }
-        gt_boxes = seg["gt_boxes"][None].to(device)
         seg_images = seg["seg_images"][None].to(device)
+        image = Image.open(base_path / sample["image"]).convert("RGB")
+        image.load()
+        gt_orig = (np.array(Image.open(base_path / sample["mask"]).convert("L")) > 0).astype(np.uint8)
+        gt_box = seg["gt_boxes"]
+        generated_text = None
+        bbox_parse_success = True
+        bbox_parse_error = None
+
+        try:
+            if bbox_source == "generated":
+                generated_text, data = generate_bbox(model, processor, image, device, max_new_tokens)
+                raw_box = parse_generated_bbox(generated_text)
+                eval_box = normalize_box(raw_box, image.width, image.height)
+            else:
+                data = make_messages(source, processor)
+                eval_box = jitter_box(gt_box, bbox_jitter, rng)
+            eval_box_pixels = box_to_pixels(eval_box.tolist(), image.width, image.height)
+            eval_bbox_iou = bbox_iou(eval_box_pixels, sample["bbox_2d"])
+        except Exception as e:
+            if bbox_source != "generated":
+                raise
+            bbox_parse_success = False
+            bbox_parse_error = str(e)
+            rows.append(
+                {
+                    "idx": idx,
+                    "image": sample["image"],
+                    "mask": sample["mask"],
+                    "threshold": threshold,
+                    "bbox_source": bbox_source,
+                    "bbox_parse_success": False,
+                    "bbox_parse_error": bbox_parse_error,
+                    "generated_text": generated_text,
+                    "dice": None,
+                    "miou": None,
+                    "iou": None,
+                    "intersection": None,
+                    "union": None,
+                    "pred_pixels": None,
+                    "gt_pixels": int(gt_orig.sum()),
+                    "pred_area_ratio": None,
+                    "gt_area_ratio": float(gt_orig.mean()),
+                    "bbox_2d": sample["bbox_2d"],
+                    "eval_bbox_2d": None,
+                    "bbox_iou": None,
+                }
+            )
+            continue
+
         with torch.no_grad():
             logits = model.predict_masks(
-                inputs["pixel_values"],
-                inputs["image_grid_thw"],
-                gt_boxes,
+                data["pixel_values"].to(device),
+                data["image_grid_thw"].to(device),
+                eval_box[None].to(device),
                 seg_images=seg_images,
             )
             probs = torch.sigmoid(logits)[0, 0].float().cpu()
 
-        image = Image.open(base_path / sample["image"]).convert("RGB")
-        gt_orig = (np.array(Image.open(base_path / sample["mask"]).convert("L")) > 0).astype(np.uint8)
         pred_orig = F.interpolate(
             probs[None, None],
             size=gt_orig.shape,
@@ -247,17 +477,22 @@ def main():
             align_corners=False,
         )[0, 0].numpy()
         pred_bin = (pred_orig >= threshold).astype(np.uint8)
-        dice, iou = binary_metrics(pred_bin, gt_orig)
+        dice, miou, iou, inter, union, pred_pixels, gt_pixels = binary_metrics(pred_bin, gt_orig)
         for item_threshold in threshold_sweep:
             sweep_pred = (pred_orig >= item_threshold).astype(np.uint8)
-            sweep_dice, sweep_iou = binary_metrics(sweep_pred, gt_orig)
+            sweep_dice, sweep_miou, sweep_iou, sweep_inter, sweep_union, sweep_pred_pixels, _ = binary_metrics(sweep_pred, gt_orig)
             sweep_rows.append(
                 {
                     "idx": idx,
                     "image": sample["image"],
                     "threshold": item_threshold,
                     "dice": sweep_dice,
-                    "miou": sweep_iou,
+                    "miou": sweep_miou,
+                    "iou": sweep_iou,
+                    "intersection": sweep_inter,
+                    "union": sweep_union,
+                    "pred_pixels": sweep_pred_pixels,
+                    "gt_pixels": gt_pixels,
                     "pred_area_ratio": float(sweep_pred.mean()),
                     "gt_area_ratio": float(gt_orig.mean()),
                 }
@@ -268,11 +503,23 @@ def main():
                 "image": sample["image"],
                 "mask": sample["mask"],
                 "threshold": threshold,
+                "bbox_source": bbox_source,
+                "bbox_jitter": bbox_jitter,
+                "bbox_parse_success": bbox_parse_success,
+                "bbox_parse_error": bbox_parse_error,
+                "generated_text": generated_text,
                 "dice": dice,
-                "miou": iou,
+                "miou": miou,
+                "iou": iou,
+                "intersection": inter,
+                "union": union,
+                "pred_pixels": pred_pixels,
+                "gt_pixels": gt_pixels,
                 "pred_area_ratio": float(pred_bin.mean()),
                 "gt_area_ratio": float(gt_orig.mean()),
                 "bbox_2d": sample["bbox_2d"],
+                "eval_bbox_2d": eval_box_pixels,
+                "bbox_iou": eval_bbox_iou,
             }
         )
         vis_items.append(
@@ -282,7 +529,7 @@ def main():
                 "image": image,
                 "gt_mask": gt_orig.astype(bool),
                 "pred_mask": pred_bin.astype(bool),
-                "box": sample["bbox_2d"],
+                "box": eval_box_pixels,
                 "dice": dice,
             }
         )
@@ -297,15 +544,31 @@ def main():
             overlay = overlay_image(item["image"], item["gt_mask"], item["pred_mask"], item["box"], overlay_alpha)
             overlay.save(overlay_dir / f"{item['idx']:03d}_{item['stem']}.png")
     save_overview(vis_items, output_dir / "overview.png", overlay_alpha, overview_count)
+    valid_df = df[df["bbox_parse_success"].fillna(False) & df["iou"].notna()]
+    total_inter = int(valid_df["intersection"].sum()) if len(valid_df) else 0
+    total_union = int(valid_df["union"].sum()) if len(valid_df) else 0
     summary = {
         "annotation": str(annotation_path),
         "checkpoint": str(checkpoint_path),
+        "bbox_source": bbox_source,
+        "bbox_jitter": bbox_jitter,
+        "bbox_jitter_seed": bbox_jitter_seed,
         "threshold": threshold,
         "samples": len(rows),
+        "evaluated_samples": int(len(valid_df)),
+        "bbox_parse_success_rate": float(df["bbox_parse_success"].fillna(False).mean()),
         "dice_mean": float(df["dice"].mean()),
         "dice_median": float(df["dice"].median()),
         "miou_mean": float(df["miou"].mean()),
         "miou_median": float(df["miou"].median()),
+        "iou_mean": float(df["iou"].mean()),
+        "iou_median": float(df["iou"].median()),
+        "ciou": float(total_inter / total_union) if total_union > 0 else None,
+        "p_at_0_5": float((valid_df["iou"] >= 0.5).mean()) if len(valid_df) else None,
+        "p_at_0_7": float((valid_df["iou"] >= 0.7).mean()) if len(valid_df) else None,
+        "p_at_0_9": float((valid_df["iou"] >= 0.9).mean()) if len(valid_df) else None,
+        "bbox_iou_mean": float(df["bbox_iou"].mean()),
+        "bbox_iou_median": float(df["bbox_iou"].median()),
         "pred_area_ratio_mean": float(df["pred_area_ratio"].mean()),
         "gt_area_ratio_mean": float(df["gt_area_ratio"].mean()),
     }
@@ -318,6 +581,8 @@ def main():
                 dice_median=("dice", "median"),
                 miou_mean=("miou", "mean"),
                 miou_median=("miou", "median"),
+                iou_mean=("iou", "mean"),
+                iou_median=("iou", "median"),
                 pred_area_ratio_mean=("pred_area_ratio", "mean"),
                 gt_area_ratio_mean=("gt_area_ratio", "mean"),
             )
@@ -327,6 +592,7 @@ def main():
         summary["best_threshold"] = float(best["threshold"])
         summary["best_threshold_dice_mean"] = float(best["dice_mean"])
         summary["best_threshold_miou_mean"] = float(best["miou_mean"])
+        summary["best_threshold_iou_mean"] = float(best["iou_mean"])
         sweep_df.to_json(output_dir / "threshold_predictions.jsonl", orient="records", lines=True, force_ascii=False)
         threshold_df.to_excel(output_dir / "threshold_sweep.xlsx", index=False)
         (output_dir / "threshold_sweep.json").write_text(
@@ -336,6 +602,7 @@ def main():
     (output_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     df.to_json(output_dir / "predictions.jsonl", orient="records", lines=True, force_ascii=False)
     df.to_excel(output_dir / "metrics.xlsx", index=False)
+    write_failure_cases(rows, output_dir / "failure_cases.json", failure_cases_count)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 

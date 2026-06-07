@@ -9,6 +9,7 @@ venv/
 .cache/
 
 # Training and evaluation artifacts
+doc/
 outputs/
 checkpoints/
 runs/
@@ -25,6 +26,9 @@ data/TongeImageDataset/origin_GT/
 
 # Large local reference files
 materials/
+
+# External tools
+paru/
 
 # OS/editor files
 .DS_Store

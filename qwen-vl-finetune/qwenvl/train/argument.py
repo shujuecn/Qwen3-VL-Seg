@@ -44,6 +44,8 @@ class TrainingArguments(transformers.TrainingArguments):
     seg_box_alpha: float = field(default=0.0)
     seg_use_highres_fusion: bool = field(default=False)
     seg_refine: bool = field(default=False)
+    seg_use_box_film: bool = field(default=False)
+    seg_box_fourier_bands: int = field(default=8)
 
     ## Lora config
     lora_enable: bool = field(default=False)

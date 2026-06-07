@@ -11,12 +11,28 @@ class TongueMaskHead(nn.Module):
         mask_size=256,
         use_highres_fusion=True,
         use_refine=False,
+        use_box_film=False,
+        box_fourier_bands=8,
     ):
         super().__init__()
         self.mask_size = mask_size
         self.use_highres_fusion = use_highres_fusion
         self.use_refine = use_refine
+        self.use_box_film = use_box_film
         self.proj = nn.Conv2d(in_dim, hidden_dim, kernel_size=1)
+        if self.use_box_film:
+            freqs = torch.pow(2, torch.arange(box_fourier_bands, dtype=torch.float32))
+            self.register_buffer("box_freqs", freqs, persistent=False)
+            box_dim = 4 * box_fourier_bands * 2
+            self.box_film = nn.Sequential(
+                nn.Linear(box_dim, hidden_dim),
+                nn.GELU(),
+                nn.Linear(hidden_dim, hidden_dim * 2),
+            )
+            nn.init.zeros_(self.box_film[-1].weight)
+            nn.init.zeros_(self.box_film[-1].bias)
+        else:
+            self.box_film = None
         if self.use_highres_fusion:
             self.image_stem = nn.Sequential(
                 nn.Conv2d(3, hidden_dim // 4, kernel_size=3, padding=1),
@@ -44,8 +60,22 @@ class TongueMaskHead(nn.Module):
         else:
             self.refine_net = None
 
-    def forward(self, features, box_gate, seg_images=None):
+    def _box_fourier(self, boxes):
+        x1, y1, x2, y2 = boxes.unbind(dim=1)
+        w = (x2 - x1).clamp_min(1e-4)
+        h = (y2 - y1).clamp_min(1e-4)
+        values = torch.stack([x1, y1, 0.2 * torch.log(w) + 0.5, 0.2 * torch.log(h) + 0.5], dim=1)
+        angles = values[:, :, None] * self.box_freqs.to(device=boxes.device, dtype=boxes.dtype)[None, None] * torch.pi
+        return torch.cat([torch.sin(angles), torch.cos(angles)], dim=-1).flatten(1)
+
+    def forward(self, features, box_gate, boxes=None, seg_images=None):
         features = self.proj(features)
+        if self.box_film is not None:
+            if boxes is None:
+                raise ValueError("box FiLM requires normalized boxes")
+            film = self.box_film(self._box_fourier(boxes.to(device=features.device, dtype=features.dtype)))
+            scale, bias = film.chunk(2, dim=1)
+            features = features * (1 + scale[:, :, None, None]) + bias[:, :, None, None]
         if self.image_stem is None:
             box_gate = F.interpolate(
                 box_gate,
@@ -104,6 +134,8 @@ class Qwen3VLSegForConditionalGeneration(nn.Module):
         seg_box_alpha=0.0,
         seg_use_highres_fusion=False,
         seg_refine=False,
+        seg_use_box_film=False,
+        seg_box_fourier_bands=8,
     ):
         super().__init__()
         self.base_model = base_model
@@ -114,6 +146,8 @@ class Qwen3VLSegForConditionalGeneration(nn.Module):
         self.seg_box_alpha = seg_box_alpha
         self.seg_use_highres_fusion = seg_use_highres_fusion
         self.seg_refine = seg_refine
+        self.seg_use_box_film = seg_use_box_film
+        self.seg_box_fourier_bands = seg_box_fourier_bands
         vision_config = base_model.config.vision_config
         in_dim = getattr(vision_config, "out_hidden_size", None) or vision_config.hidden_size
         self.mask_head = TongueMaskHead(
@@ -121,6 +155,8 @@ class Qwen3VLSegForConditionalGeneration(nn.Module):
             mask_size=self.seg_mask_size,
             use_highres_fusion=self.seg_use_highres_fusion,
             use_refine=self.seg_refine,
+            use_box_film=self.seg_use_box_film,
+            box_fourier_bands=self.seg_box_fourier_bands,
         )
 
         for param in self.base_model.parameters():
@@ -222,7 +258,7 @@ class Qwen3VLSegForConditionalGeneration(nn.Module):
         image_features = self._split_image_features(image_features, image_grid_thw)
         gt_boxes = gt_boxes.to(device=image_features.device, dtype=image_features.dtype)
         box_gate = self._box_gate(gt_boxes, self.seg_mask_size).to(dtype=image_features.dtype)
-        return self.mask_head(image_features, box_gate, seg_images=seg_images)
+        return self.mask_head(image_features, box_gate, boxes=gt_boxes, seg_images=seg_images)
 
     def forward(
         self,

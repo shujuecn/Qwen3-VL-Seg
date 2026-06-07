@@ -131,6 +131,8 @@ def save_run_config(output_dir, model_args, data_args, training_args, attn_imple
         "seg_box_alpha": training_args.seg_box_alpha,
         "seg_use_highres_fusion": training_args.seg_use_highres_fusion,
         "seg_refine": training_args.seg_refine,
+        "seg_use_box_film": training_args.seg_use_box_film,
+        "seg_box_fourier_bands": training_args.seg_box_fourier_bands,
         "per_device_train_batch_size": training_args.per_device_train_batch_size,
         "gradient_accumulation_steps": training_args.gradient_accumulation_steps,
         "learning_rate": training_args.learning_rate,
@@ -149,14 +151,14 @@ def save_run_config(output_dir, model_args, data_args, training_args, attn_imple
 
 def train(attn_implementation="auto"):
     global local_rank
-    attn_implementation = resolve_attn_implementation(attn_implementation)
+    attn_implementation = resolve_attn_implementation(attn_implementation) # Scaled Dot-Product Attention
 
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments)
     )
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    local_rank = training_args.local_rank
+    local_rank = training_args.local_rank # -1 means no distributed training, 0 means the first process in distributed training
     os.makedirs(training_args.output_dir, exist_ok=True)
     if training_args.seg_enable:
         if data_args.data_flatten or data_args.data_packing:
@@ -249,6 +251,8 @@ def train(attn_implementation="auto"):
             seg_box_alpha=training_args.seg_box_alpha,
             seg_use_highres_fusion=training_args.seg_use_highres_fusion,
             seg_refine=training_args.seg_refine,
+            seg_use_box_film=training_args.seg_use_box_film,
+            seg_box_fourier_bands=training_args.seg_box_fourier_bands,
         )
         if torch.distributed.is_available() and torch.distributed.is_initialized():
             if torch.distributed.get_rank() == 0:
@@ -277,7 +281,7 @@ def train(attn_implementation="auto"):
         if torch.distributed.is_available() and torch.distributed.is_initialized() and torch.distributed.get_rank() == 0:
             model.visual.print_trainable_parameters()
             model.model.print_trainable_parameters()
-    
+
     data_module = make_supervised_data_module(processor, data_args=data_args)
     trainer_cls = TongueSegTrainer if training_args.seg_enable else Trainer
     callbacks = [JsonlLogCallback(training_args.output_dir)] if training_args.seg_enable else None
@@ -302,7 +306,7 @@ def train(attn_implementation="auto"):
     model.config.use_cache = True
 
     safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
-    
+
     processor.save_pretrained(training_args.output_dir)
 
 
