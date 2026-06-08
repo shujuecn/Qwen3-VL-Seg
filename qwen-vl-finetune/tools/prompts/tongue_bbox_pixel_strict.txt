@@ -1,0 +1,2 @@
+<image>
+Locate the tongue in the image. Return only a JSON array with one object. The object must contain "bbox_2d" and "label". Use absolute pixel coordinates in the original image for bbox_2d as [x1, y1, x2, y2].

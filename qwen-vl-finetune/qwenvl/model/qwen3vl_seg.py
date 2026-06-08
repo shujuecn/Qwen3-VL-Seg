@@ -277,14 +277,14 @@ class Qwen3VLSegForConditionalGeneration(nn.Module):
         **kwargs,
     ):
         model_inputs = {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "position_ids": position_ids,
-            "pixel_values": pixel_values,
-            "pixel_values_videos": pixel_values_videos,
-            "image_grid_thw": image_grid_thw,
-            "video_grid_thw": video_grid_thw,
-            "logits_to_keep": 1,
+            "input_ids": input_ids,  # 图像被编码成了文本描述，作为模型的输入
+            "attention_mask": attention_mask,  # 注意力掩码，指示模型哪些位置是有效的输入，哪些是填充的
+            "position_ids": position_ids,  # 位置编码，指示模型输入中每个标记的位置
+            "pixel_values": pixel_values,  # 原始图像的像素值，作为视觉输入
+            "pixel_values_videos": pixel_values_videos,  # 视频帧的像素值，如果有的话
+            "image_grid_thw": image_grid_thw,  # 图像被划分成的网格大小， (T, H, W) 指示时间、行和列的网格数量
+            "video_grid_thw": video_grid_thw,  # 视频被划分成的网格大小， (T, H, W) 指示时间、行和列的网格数量
+            "logits_to_keep": 1,  # 模型在生成过程中保留多少个原始logits，具体用途取决于模型的实现细节
             **kwargs,
         }
         model_inputs = {k: v for k, v in model_inputs.items() if v is not None}

@@ -192,6 +192,8 @@
         "outputs/tongue_seg_phase2b_eval_test_generated",
         "--bbox_source",
         "generated",
+        "--bbox_coord_format",
+        "qwen1000",
         "--max_overlays",
         "20",
         "--overlay_top_k_worst",
@@ -213,6 +215,8 @@
         "outputs/tongue_seg_phase2b/model.safetensors",
         "--image",
         "data/TongeImageDataset/origin_Image/277.png",
+        "--bbox_coord_format",
+        "qwen1000",
         "--output_dir",
         "outputs/tongue_seg_infer_277_generated"
       ]

@@ -2,6 +2,7 @@ import json
 import os
 import re
 import sys
+import hashlib
 import importlib.metadata
 from pathlib import Path
 
@@ -70,14 +71,20 @@ def parse_generated_bbox(text):
     return parse_box(match.group(1))
 
 
-def normalize_box(box, width, height):
-    if max(box) <= 1.0:
+def normalize_box(box, width, height, coord_format="auto"):
+    if coord_format == "auto":
+        coord_format = "normalized" if max(box) <= 1.0 else "pixel"
+    if coord_format == "normalized":
         norm = torch.tensor(box, dtype=torch.float32)
-    else:
+    elif coord_format == "pixel":
         norm = torch.tensor(
             [box[0] / width, box[1] / height, box[2] / width, box[3] / height],
             dtype=torch.float32,
         )
+    elif coord_format == "qwen1000":
+        norm = torch.tensor([box[0] / 1000, box[1] / 1000, box[2] / 1000, box[3] / 1000], dtype=torch.float32)
+    else:
+        raise ValueError("--bbox_coord_format must be auto, pixel, normalized, or qwen1000")
     norm = norm.clamp(0, 1)
     if norm[2] <= norm[0] or norm[3] <= norm[1]:
         raise ValueError(f"invalid bbox after normalization: {box}")
@@ -96,13 +103,27 @@ def box_to_pixels(box, width, height):
     return [x1, y1, x2, y2]
 
 
-def build_inputs(processor, image, add_generation_prompt):
+def prompt_text(prompt):
+    return prompt.replace("<image>\n", "").replace("<image>", "").strip()
+
+
+def load_prompt(prompt_file, prompt):
+    if prompt_file:
+        return Path(prompt_file).read_text(encoding="utf-8").strip()
+    return prompt
+
+
+def hash_prompt(prompt):
+    return hashlib.sha1(prompt.encode("utf-8")).hexdigest()[:10]
+
+
+def build_inputs(processor, image, add_generation_prompt, prompt):
     messages = [
         {
             "role": "user",
             "content": [
                 {"type": "image", "image": image},
-                {"type": "text", "text": PROMPT.replace("<image>\n", "")},
+                {"type": "text", "text": prompt_text(prompt)},
             ],
         }
     ]
@@ -119,8 +140,8 @@ def to_device(batch, device):
     return {key: value.to(device) if torch.is_tensor(value) else value for key, value in batch.items()}
 
 
-def generate_bbox(base_model, processor, image, device, max_new_tokens):
-    inputs = to_device(build_inputs(processor, image, add_generation_prompt=True), device)
+def generate_bbox(base_model, processor, image, device, max_new_tokens, prompt):
+    inputs = to_device(build_inputs(processor, image, add_generation_prompt=True, prompt=prompt), device)
     input_len = inputs["input_ids"].shape[-1]
     with torch.no_grad():
         output_ids = base_model.generate(
@@ -171,6 +192,15 @@ def main():
     threshold = float(arg_value("--threshold", "0.5"))
     overlay_alpha = int(arg_value("--overlay_alpha", "90"))
     max_new_tokens = int(arg_value("--max_new_tokens", "128"))
+    box_arg = arg_value("--bbox", "")
+    bbox_coord_format = arg_value("--bbox_coord_format", "auto" if box_arg else "qwen1000")
+    prompt_file = arg_value("--prompt_file", "")
+    prompt = load_prompt(prompt_file, arg_value("--prompt", PROMPT))
+    prompt_name = arg_value(
+        "--prompt_name",
+        Path(prompt_file).stem if prompt_file else ("default" if prompt == PROMPT else "custom"),
+    )
+    prompt_hash = hash_prompt(prompt)
     device = torch.device(arg_value("--device", "cuda" if torch.cuda.is_available() else "cpu"))
 
     seg_box_expand = float(arg_value("--seg_box_expand", config.get("seg_box_expand", 0.0)))
@@ -206,16 +236,16 @@ def main():
     model.eval()
 
     generated_text = None
-    box_arg = arg_value("--bbox", "")
     if box_arg:
         box = parse_box(box_arg)
         bbox_source = "argument"
     else:
-        box, generated_text = generate_bbox(model.base_model, processor, image, device, max_new_tokens)
+        box, generated_text = generate_bbox(model.base_model, processor, image, device, max_new_tokens, prompt)
         bbox_source = "generated"
 
-    inputs = to_device(build_inputs(processor, image, add_generation_prompt=True), device)
-    gt_boxes = normalize_box(box, image.width, image.height)[None].to(device)
+    inputs = to_device(build_inputs(processor, image, add_generation_prompt=True, prompt=prompt), device)
+    norm_box = normalize_box(box, image.width, image.height, bbox_coord_format)
+    gt_boxes = norm_box[None].to(device)
     seg_images = seg_image_tensor(image, mask_size).to(device)
     with torch.no_grad():
         logits = model.predict_masks(
@@ -233,7 +263,7 @@ def main():
         align_corners=False,
     )[0, 0].numpy()
     pred_mask = pred_orig >= threshold
-    box_pixels = box_to_pixels(box, image.width, image.height)
+    box_pixels = box_to_pixels(norm_box.tolist(), image.width, image.height)
 
     stem = image_path.stem
     mask_path = output_dir / f"{stem}_mask.png"
@@ -245,7 +275,12 @@ def main():
         "image": str(image_path),
         "checkpoint": str(checkpoint_path),
         "bbox_source": bbox_source,
+        "bbox_coord_format": bbox_coord_format,
         "bbox_2d": box_pixels,
+        "prompt_name": prompt_name,
+        "prompt_hash": prompt_hash,
+        "prompt_file": prompt_file,
+        "prompt": prompt,
         "threshold": threshold,
         "pred_area_ratio": float(pred_mask.mean()),
         "mask": str(mask_path),

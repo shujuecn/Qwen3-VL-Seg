@@ -2,6 +2,7 @@ import json
 import os
 import re
 import sys
+import hashlib
 import importlib.metadata
 from pathlib import Path
 
@@ -89,14 +90,20 @@ def parse_generated_bbox(text):
     return parse_box(match.group(1))
 
 
-def normalize_box(box, width, height):
-    if max(box) <= 1.0:
+def normalize_box(box, width, height, coord_format="auto"):
+    if coord_format == "auto":
+        coord_format = "normalized" if max(box) <= 1.0 else "pixel"
+    if coord_format == "normalized":
         norm = torch.tensor(box, dtype=torch.float32)
-    else:
+    elif coord_format == "pixel":
         norm = torch.tensor(
             [box[0] / width, box[1] / height, box[2] / width, box[3] / height],
             dtype=torch.float32,
         )
+    elif coord_format == "qwen1000":
+        norm = torch.tensor([box[0] / 1000, box[1] / 1000, box[2] / 1000, box[3] / 1000], dtype=torch.float32)
+    else:
+        raise ValueError("--bbox_coord_format must be auto, pixel, normalized, or qwen1000")
     norm = norm.clamp(0, 1)
     if norm[2] <= norm[0] or norm[3] <= norm[1]:
         raise ValueError(f"invalid bbox after normalization: {box}")
@@ -166,13 +173,27 @@ def make_messages(source, processor):
     return data
 
 
-def make_generation_inputs(image, processor):
+def prompt_text(prompt):
+    return prompt.replace("<image>\n", "").replace("<image>", "").strip()
+
+
+def load_prompt(prompt_file, prompt):
+    if prompt_file:
+        return Path(prompt_file).read_text(encoding="utf-8").strip()
+    return prompt
+
+
+def hash_prompt(prompt):
+    return hashlib.sha1(prompt.encode("utf-8")).hexdigest()[:10]
+
+
+def make_generation_inputs(image, processor, prompt):
     messages = [
         {
             "role": "user",
             "content": [
                 {"type": "image", "image": image},
-                {"type": "text", "text": PROMPT.replace("<image>\n", "")},
+                {"type": "text", "text": prompt_text(prompt)},
             ],
         }
     ]
@@ -189,8 +210,8 @@ def to_device(batch, device):
     return {key: value.to(device) if torch.is_tensor(value) else value for key, value in batch.items()}
 
 
-def generate_bbox(model, processor, image, device, max_new_tokens):
-    inputs = to_device(make_generation_inputs(image, processor), device)
+def generate_bbox(model, processor, image, device, max_new_tokens, prompt):
+    inputs = to_device(make_generation_inputs(image, processor, prompt), device)
     input_len = inputs["input_ids"].shape[-1]
     with torch.no_grad():
         output_ids = model.base_model.generate(
@@ -358,6 +379,14 @@ def main():
     bbox_source = arg_value("--bbox_source", "gt")
     bbox_jitter = float(arg_value("--bbox_jitter", "0.0"))
     bbox_jitter_seed = int(arg_value("--bbox_jitter_seed", "0"))
+    bbox_coord_format = arg_value("--bbox_coord_format", "qwen1000" if bbox_source == "generated" else "auto")
+    prompt_file = arg_value("--prompt_file", "")
+    prompt = load_prompt(prompt_file, arg_value("--prompt", PROMPT))
+    prompt_name = arg_value(
+        "--prompt_name",
+        Path(prompt_file).stem if prompt_file else ("default" if prompt == PROMPT else "custom"),
+    )
+    prompt_hash = hash_prompt(prompt)
     max_new_tokens = int(arg_value("--max_new_tokens", "128"))
     max_overlays = int(arg_value("--max_overlays", str(MAX_OVERLAYS)))
     overlay_alpha = int(arg_value("--overlay_alpha", "90"))
@@ -422,9 +451,9 @@ def main():
 
         try:
             if bbox_source == "generated":
-                generated_text, data = generate_bbox(model, processor, image, device, max_new_tokens)
+                generated_text, data = generate_bbox(model, processor, image, device, max_new_tokens, prompt)
                 raw_box = parse_generated_bbox(generated_text)
-                eval_box = normalize_box(raw_box, image.width, image.height)
+                eval_box = normalize_box(raw_box, image.width, image.height, bbox_coord_format)
             else:
                 data = make_messages(source, processor)
                 eval_box = jitter_box(gt_box, bbox_jitter, rng)
@@ -445,6 +474,9 @@ def main():
                     "bbox_parse_success": False,
                     "bbox_parse_error": bbox_parse_error,
                     "generated_text": generated_text,
+                    "prompt_name": prompt_name,
+                    "prompt_hash": prompt_hash,
+                    "bbox_coord_format": bbox_coord_format,
                     "dice": None,
                     "miou": None,
                     "iou": None,
@@ -486,6 +518,9 @@ def main():
                     "idx": idx,
                     "image": sample["image"],
                     "threshold": item_threshold,
+                    "prompt_name": prompt_name,
+                    "prompt_hash": prompt_hash,
+                    "bbox_coord_format": bbox_coord_format,
                     "dice": sweep_dice,
                     "miou": sweep_miou,
                     "iou": sweep_iou,
@@ -508,6 +543,9 @@ def main():
                 "bbox_parse_success": bbox_parse_success,
                 "bbox_parse_error": bbox_parse_error,
                 "generated_text": generated_text,
+                "prompt_name": prompt_name,
+                "prompt_hash": prompt_hash,
+                "bbox_coord_format": bbox_coord_format,
                 "dice": dice,
                 "miou": miou,
                 "iou": iou,
@@ -553,6 +591,11 @@ def main():
         "bbox_source": bbox_source,
         "bbox_jitter": bbox_jitter,
         "bbox_jitter_seed": bbox_jitter_seed,
+        "bbox_coord_format": bbox_coord_format,
+        "prompt_name": prompt_name,
+        "prompt_hash": prompt_hash,
+        "prompt_file": prompt_file,
+        "prompt": prompt,
         "threshold": threshold,
         "samples": len(rows),
         "evaluated_samples": int(len(valid_df)),

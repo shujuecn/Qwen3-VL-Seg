@@ -6,15 +6,16 @@
 
 - **主模型保留 Phase 2B**：GT bbox 上限最高，作为当前可复现结果。
 - **R1-R3 已补齐论文式评估**：`cIoU`、`P@0.5/0.7/0.9`、bbox jitter、generated-bbox 端到端评估。
-- **R4 BoxFiLM 已实现但不推荐替代 Phase 2B**：generated-bbox 下略有提升，但 GT/jitter 主指标低于 Phase 2B，按验收规则属于负向消融。
-- **暂不做 R5/R6**：当前端到端瓶颈主要是 Qwen3-VL generated bbox 定位，继续堆 decoder 或 LoRA 不符合当前证据。
+- **P1 已修正 generated-bbox 坐标制**：Qwen3-VL 默认生成的 `bbox_2d` 更符合 0-1000 坐标；旧评估按像素坐标解析会系统性低估端到端表现。
+- **R4 BoxFiLM 已实现但不推荐替代 Phase 2B**：GT/jitter 主指标低于 Phase 2B，按验收规则属于负向消融。
+- **暂不做 bbox LoRA / R5 / R6**：修正 qwen1000 坐标后 generated-bbox 已接近 GT-bbox 上限，继续堆 decoder 或 LoRA 暂无证据支撑。
 
 详细路线与验收依据见：
 
 - `doc/Qwen3-VL-Seg论文复现指导计划.md`
-- `outputs/tongue_seg_phase2b_r1_r3_summary/conclusion.json`
-- `outputs/tongue_seg_phase2b_boxfilm_summary/conclusion.json`
-- `outputs/tongue_seg_phase2b_boxfilm_summary/final_audit.json`
+- `outputs/tongue_seg_next_baseline_summary/conclusion.json`
+- `outputs/tongue_seg_p1_prompt_summary/conclusion.json`
+- `doc/qwen1000修正后模型表现优化任务计划.md`
 
 ## 数据
 
@@ -219,8 +220,9 @@ conda run --no-capture-output -n torch python qwen-vl-finetune/tools/eval_tongue
 conda run --no-capture-output -n torch python qwen-vl-finetune/tools/eval_tongue_seg.py \
   --checkpoint outputs/tongue_seg_phase2b/model.safetensors \
   --annotation data/TongeImageDataset/test.json \
-  --output_dir outputs/tongue_seg_phase2b_eval_test_generated \
+  --output_dir outputs/tongue_seg_phase2b_eval_test_generated_qwen1000 \
   --bbox_source generated \
+  --bbox_coord_format qwen1000 \
   --max_overlays 20 \
   --overlay_top_k_worst 20 \
   --overview_count 20
@@ -240,24 +242,24 @@ Phase 2B GT-bbox 上限：
 
 | split | Dice mean | mIoU mean | cIoU | P@0.9 |
 | --- | ---: | ---: | ---: | ---: |
-| val | 0.9764 | 0.9541 | 0.9546 | 1.0000 |
-| test | 0.9753 | 0.9520 | 0.9534 | 0.9667 |
+| val | 0.9766 | 0.9545 | 0.9549 | 1.0000 |
+| test | 0.9749 | 0.9512 | 0.9529 | 0.9667 |
 
-generated-bbox 端到端：
+generated-bbox 端到端，按 Qwen 0-1000 坐标解析：
 
 | split | bbox IoU mean | Dice mean | mIoU mean | P@0.9 |
 | --- | ---: | ---: | ---: | ---: |
-| val | 0.3472 | 0.9141 | 0.8440 | 0.1667 |
-| test | 0.3621 | 0.9159 | 0.8481 | 0.2333 |
+| val | 0.9442 | 0.9756 | 0.9526 | 0.9667 |
+| test | 0.9397 | 0.9733 | 0.9485 | 0.9333 |
 
-结论：mask head 在 GT bbox 下上限较高；端到端下降主要来自 Qwen3-VL 生成 bbox 不准。
+旧的 generated-bbox 评估把 0-1000 坐标按像素坐标解释，test bbox IoU 只有 `0.3621`，Dice `0.9201`。修正为 `--bbox_coord_format qwen1000` 后，test bbox IoU 升到 `0.9397`，Dice 升到 `0.9733`。结论：主要问题是坐标制解析，不是 Qwen3-VL 定位能力不足。
 
 R4 BoxFiLM 对比结论：
 
 - GT-bbox val Dice 从 `0.9764` 降到 `0.9753`，P@0.9 从 `1.0` 降到 `0.9667`。
 - GT-bbox test Dice 从 `0.9753` 降到 `0.9750`，P@0.9 持平 `0.9667`。
-- generated-bbox test Dice 从 `0.9159` 升到 `0.9221`，但 bbox IoU 不变，仍约 `0.3621`。
-- 按验收规则，R4 不替代 Phase 2B。
+- 旧坐标解释下 generated-bbox test Dice 从 `0.9159` 升到 `0.9221`，但 bbox IoU 不变。
+- 正确 qwen1000 坐标下，Phase 2B 已满足下一阶段端到端目标；R4 不替代 Phase 2B。
 
 ## 输出保留策略
 
@@ -266,14 +268,16 @@ R4 BoxFiLM 对比结论：
 - `outputs/tongue_seg_phase2b/`
 - `outputs/tongue_seg_phase2b_eval_val/`
 - `outputs/tongue_seg_phase2b_eval_test/`
-- `outputs/tongue_seg_phase2b_r1_r3_summary/`
-- `outputs/tongue_seg_phase2b_boxfilm_summary/`
+- `outputs/tongue_seg_phase2b_eval_val_generated_qwen1000/`
+- `outputs/tongue_seg_phase2b_eval_test_generated_qwen1000/`
+- `outputs/tongue_seg_next_baseline_summary/`
+- `outputs/tongue_seg_p1_prompt_summary/`
 
 可删除：
 
 - smoke 输出，如 `outputs/*smoke*`
 - 训练中间 `checkpoint-*`
-- 已汇总后的 R4 详细 eval 目录：`outputs/tongue_seg_phase2b_boxfilm_eval_*`
+- 已汇总后的旧 R4 详细 eval 目录：`outputs/tongue_seg_phase2b_boxfilm_eval_*`
 - 过期临时对比文件
 
 不要删除：
@@ -281,7 +285,7 @@ R4 BoxFiLM 对比结论：
 - `outputs/tongue_seg_phase2b/model.safetensors`
 - `outputs/tongue_seg_phase2b/run_config.json`
 - `outputs/tongue_seg_phase2b/train_log.jsonl`
-- summary 目录里的 `comparison.xlsx`、`comparison.jsonl`、`conclusion.json`、`final_audit.json`
+- summary 目录里的 `comparison.xlsx`、`comparison.jsonl`、`conclusion.json`
 
 ## 本地验证
 
@@ -296,8 +300,9 @@ conda run -n torch python -m py_compile \
   qwen-vl-finetune/tools/infer_seg.py
 ```
 
-当前最终审计已写入：
+当前 P0/P1 审计已写入：
 
 ```text
-outputs/tongue_seg_phase2b_boxfilm_summary/final_audit.json
+outputs/tongue_seg_next_baseline_summary/conclusion.json
+outputs/tongue_seg_p1_prompt_summary/conclusion.json
 ```

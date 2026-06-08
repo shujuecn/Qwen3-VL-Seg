@@ -119,7 +119,9 @@ def configure_seg_defaults(training_args):
         training_args.save_total_limit = 3
 
 
-def save_run_config(output_dir, model_args, data_args, training_args, attn_implementation):
+def save_run_config(
+    output_dir, model_args, data_args, training_args, attn_implementation
+):
     path = Path(output_dir) / "run_config.json"
     config = {
         "model_name_or_path": model_args.model_name_or_path,
@@ -151,26 +153,41 @@ def save_run_config(output_dir, model_args, data_args, training_args, attn_imple
 
 def train(attn_implementation="auto"):
     global local_rank
-    attn_implementation = resolve_attn_implementation(attn_implementation) # Scaled Dot-Product Attention
+    attn_implementation = resolve_attn_implementation(
+        attn_implementation
+    )  # Scaled Dot-Product Attention
 
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments)
     )
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    local_rank = training_args.local_rank # -1 means no distributed training, 0 means the first process in distributed training
+    local_rank = training_args.local_rank  # -1 means no distributed training, 0 means the first process in distributed training
     os.makedirs(training_args.output_dir, exist_ok=True)
     if training_args.seg_enable:
         if data_args.data_flatten or data_args.data_packing:
-            raise ValueError("segmentation training does not support data_flatten or data_packing")
+            raise ValueError(
+                "segmentation training does not support data_flatten or data_packing"
+            )
         if training_args.lora_enable:
             raise ValueError("phase 1 segmentation training does not support LoRA")
         configure_seg_defaults(training_args)
-    save_run_config(training_args.output_dir, model_args, data_args, training_args, attn_implementation)
+    save_run_config(
+        training_args.output_dir,
+        model_args,
+        data_args,
+        training_args,
+        attn_implementation,
+    )
 
-    if "qwen3" in model_args.model_name_or_path.lower() and "a" in Path(model_args.model_name_or_path.rstrip("/")).name.lower():
+    if (
+        "qwen3" in model_args.model_name_or_path.lower()
+        and "a" in Path(model_args.model_name_or_path.rstrip("/")).name.lower()
+    ):
         if training_args.seg_enable:
-            raise ValueError("phase 1 segmentation training only supports dense Qwen3-VL")
+            raise ValueError(
+                "phase 1 segmentation training only supports dense Qwen3-VL"
+            )
         from transformers import Qwen3VLMoeForConditionalGeneration
 
         model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
@@ -211,7 +228,9 @@ def train(attn_implementation="auto"):
         )
         data_args.model_type = "qwen2vl"
 
-    print(f'the initlized model is {model_args.model_name_or_path} the class is {model.__class__.__name__}')
+    print(
+        f"the initlized model is {model_args.model_name_or_path} the class is {model.__class__.__name__}"
+    )
     processor = AutoProcessor.from_pretrained(
         model_args.model_name_or_path,
     )
@@ -235,8 +254,8 @@ def train(attn_implementation="auto"):
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=training_args.cache_dir,
-        model_max_length=training_args.model_max_length,
-        padding_side="right",
+        model_max_length=training_args.model_max_length,  # 模型能接受的最大长度，超过会被截断
+        padding_side="right",  # 模型的填充方式，通常语言模型使用右填充
         use_fast=False,
     )
 
@@ -253,14 +272,19 @@ def train(attn_implementation="auto"):
             seg_refine=training_args.seg_refine,
             seg_use_box_film=training_args.seg_use_box_film,
             seg_box_fourier_bands=training_args.seg_box_fourier_bands,
-        )
+        )  # 这是一个包装模型，真正的权重还在原模型里，trainable mask head 会在第一次 forward 时被初始化并加入到优化器中
         if torch.distributed.is_available() and torch.distributed.is_initialized():
             if torch.distributed.get_rank() == 0:
-                rank0_print("Segmentation enabled: trainable mask head will be initialized on first forward.")
+                rank0_print(
+                    "Segmentation enabled: trainable mask head will be initialized on first forward."
+                )
         else:
-            rank0_print("Segmentation enabled: trainable mask head will be initialized on first forward.")
+            rank0_print(
+                "Segmentation enabled: trainable mask head will be initialized on first forward."
+            )
     elif training_args.lora_enable:
         from peft import LoraConfig, get_peft_model, TaskType
+
         print("LoRA enabled")
 
         for p in model.parameters():
@@ -270,7 +294,12 @@ def train(attn_implementation="auto"):
             r=training_args.lora_r or 64,
             lora_alpha=training_args.lora_alpha or 128,
             lora_dropout=training_args.lora_dropout or 0.05,
-            target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],  # Qwen 的 attention 线性层
+            target_modules=[
+                "q_proj",
+                "k_proj",
+                "v_proj",
+                "o_proj",
+            ],  # Qwen 的 attention 线性层
             bias="none",
             task_type=TaskType.CAUSAL_LM,
         )
@@ -278,24 +307,34 @@ def train(attn_implementation="auto"):
     else:
         set_model(model_args, model)
 
-        if torch.distributed.is_available() and torch.distributed.is_initialized() and torch.distributed.get_rank() == 0:
+        if (
+            torch.distributed.is_available()
+            and torch.distributed.is_initialized()
+            and torch.distributed.get_rank() == 0
+        ):
             model.visual.print_trainable_parameters()
             model.model.print_trainable_parameters()
 
     data_module = make_supervised_data_module(processor, data_args=data_args)
     trainer_cls = TongueSegTrainer if training_args.seg_enable else Trainer
-    callbacks = [JsonlLogCallback(training_args.output_dir)] if training_args.seg_enable else None
+    callbacks = (
+        [JsonlLogCallback(training_args.output_dir)]
+        if training_args.seg_enable
+        else None
+    )
     trainer = trainer_cls(
         model=model,
         processing_class=tokenizer,
         args=training_args,
         callbacks=callbacks,
         **data_module,
-    )
+    )  # trainer 是真正的训练类，封装了训练循环、评估循环、保存加载等功能
 
     checkpoints = list(pathlib.Path(training_args.output_dir).glob("checkpoint-*"))
     if checkpoints and training_args.seg_enable:
-        checkpoints = [path for path in checkpoints if (path / "trainer_state.json").exists()]
+        checkpoints = [
+            path for path in checkpoints if (path / "trainer_state.json").exists()
+        ]
     if checkpoints:
         logging.info("checkpoint found, resume training")
         trainer.train(resume_from_checkpoint=True)
